@@ -4,7 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
-import makeWASocket,{BufferJSON,DisconnectReason,initAuthCreds,jidNormalizedUser,proto} from '@whiskeysockets/baileys';
+import makeWASocket,{BufferJSON,DisconnectReason,generateMessageIDV2,initAuthCreds,jidNormalizedUser,proto} from '@whiskeysockets/baileys';
 import QRCode from 'qrcode';
 import pino from 'pino';
 
@@ -47,12 +47,14 @@ let stored;
 try{stored=JSON.parse(await dpapi('Unprotect',(await fs.readFile(authPath)).toString('base64')),BufferJSON.reviver);}catch(error){if(error.code!=='ENOENT')throw new Error('Sessão protegida ilegível. A sessão existente foi preservada.');}
 const auth={creds:stored?.creds||initAuthCreds(),keys:stored?.keys||{}};
 let completed=new Map((stored?.completed||[]).filter(item=>Array.isArray(item)&&item[1]>Date.now()-86400000));
-let persistence=Promise.resolve(),socket=null,started=false,stopping=false,polling=false,reconnecting=null,qrValue='',qrImage=null,revision=0;
-let state={status:'idle',connected:false,number:expectedNumber,message:'Clique em Gerar QR para vincular o WhatsApp do ZapDMR.',qrAvailable:false,lastPollAt:null,lastIncomingAt:null};
+let dispatches=new Map((stored?.dispatches||[]).filter(item=>Array.isArray(item)&&item[1]?.at>Date.now()-600000));
+const otpMessages=new Map(); // Message bodies exist only in memory, bounded to 100 entries / 10 minutes.
+let persistence=Promise.resolve(),socket=null,started=false,stopping=false,polling=false,flushingReceipts=false,reconnecting=null,qrValue='',qrImage=null,revision=0;
+let state={status:'idle',connected:false,number:expectedNumber,message:'Clique em Gerar QR para vincular o WhatsApp do ZapDMR.',qrAvailable:false,lastPollAt:null,lastIncomingAt:null,lastDispatch:null};
 function setState(change){state={...state,...change};revision++;}
 function failClosed(){started=false;qrValue='';qrImage=null;const old=socket;socket=null;old?.end(new Error('Proteção da sessão indisponível.'));setState({status:'error',connected:false,qrAvailable:false,message:'Não foi possível proteger a sessão no Windows. A ponte foi interrompida.'});}
 function persist(){
-  const snapshot=JSON.stringify({version:1,creds:auth.creds,keys:auth.keys,completed:[...completed.entries()].slice(-200)},BufferJSON.replacer);
+  const snapshot=JSON.stringify({version:1,creds:auth.creds,keys:auth.keys,completed:[...completed.entries()].slice(-200),dispatches:[...dispatches.entries()].slice(-200)},BufferJSON.replacer);
   const task=persistence.then(async()=>{const protectedText=await dpapi('Protect',snapshot);await fs.writeFile(authPath+'.new',Buffer.from(protectedText,'base64'),{mode:0o600});await fs.rename(authPath+'.new',authPath);});
   persistence=task.catch(()=>{failClosed();});return task;
 }
@@ -72,6 +74,68 @@ function sameOfficialNumber(number){
   if(number===expectedNumber)return true;
   const mobile=expectedNumber.match(/^(\+55\d{2})9([6-9]\d{7})$/),legacy=expectedNumber.match(/^(\+55\d{2})([6-9]\d{7})$/);
   return Boolean(mobile&&number===mobile[1]+mobile[2]||legacy&&number===legacy[1]+'9'+legacy[2]);
+}
+function phoneVariants(number){
+  const values=[number],mobile=number.match(/^(\+55\d{2})9([6-9]\d{7})$/),legacy=number.match(/^(\+55\d{2})([6-9]\d{7})$/);
+  if(mobile)values.push(mobile[1]+mobile[2]);else if(legacy)values.push(legacy[1]+'9'+legacy[2]);
+  return values;
+}
+async function resolveDestination(sock,number){
+  if(sameOfficialNumber(number)){
+    const jid=jidNormalizedUser(sock.user?.id||auth.creds.me?.id||'');
+    if(!/^\d+@s\.whatsapp\.net$/.test(jid)||!sameOfficialNumber('+'+jid.split('@')[0]))throw new Error('Identidade oficial indisponível.');
+    return {jid,route:'self'};
+  }
+  const allowed=phoneVariants(number);
+  for(const candidate of allowed){
+    const results=await sock.onWhatsApp(candidate);
+    for(const entry of Array.isArray(results)?results:[]){
+      const jid=jidNormalizedUser(entry?.jid||'');
+      if(entry?.exists===true&&/^\d+@s\.whatsapp\.net$/.test(jid)&&allowed.includes('+'+jid.split('@')[0]))return {jid,route:'lookup'};
+    }
+  }
+  throw new Error('Número não localizado no WhatsApp.');
+}
+function dispatchState(record,stage){setState({lastDispatch:{at:Date.now(),route:record.route,stage}});}
+function pruneDispatches(){
+  const until=Date.now()-600000;
+  for(const [id,record]of dispatches)if(record.at<until)dispatches.delete(id);
+  for(const [id,entry]of otpMessages)if(entry.at<until)otpMessages.delete(id);
+  while(dispatches.size>200)dispatches.delete(dispatches.keys().next().value);
+  while(otpMessages.size>100)otpMessages.delete(otpMessages.keys().next().value);
+}
+function rememberOtp(messageId,message){pruneDispatches();otpMessages.set(messageId,{at:Date.now(),message});while(otpMessages.size>100)otpMessages.delete(otpMessages.keys().next().value);}
+async function flushReceiptAcks(){
+  if(flushingReceipts)return;
+  flushingReceipts=true;let changed=false;
+  try{
+    pruneDispatches();
+    for(const record of dispatches.values()){
+      if(!record.submissionFinished)continue;
+      try{
+        const leaseId=record.leaseId;
+        // Always establish the submission ACK before its delivery ACK. An
+        // early receipt merely updates this record until sendMessage ends.
+        if(record.submitted&&!record.submissionAcked){await api('/v1/whatsapp/bridge/ack',{id:record.jobId,status:'sent',leaseId});if(record.leaseId!==leaseId)continue;record.submissionAcked=true;changed=true;}
+        if(['delivered','failed'].includes(record.stage)&&record.receiptAcked!==record.stage){
+          const receiptStage=record.stage;
+          await api('/v1/whatsapp/bridge/ack',{id:record.jobId,status:receiptStage,leaseId});if(record.leaseId!==leaseId)continue;record.receiptAcked=receiptStage;changed=true;
+        }
+      }catch{break;} // Retry metadata on the next tick; never resend an OTP here.
+    }
+    if(changed)await persist();
+  }catch{}finally{flushingReceipts=false;}
+}
+function receiveDeliveryUpdates(updates,sock){
+  if(socket!==sock)return;
+  let changed=false;
+  for(const item of Array.isArray(updates)?updates:[]){
+    const id=String(item.key?.id||''),record=dispatches.get(id),status=item.update?.status;
+    if(!record||record.at<Date.now()-600000||!Number.isInteger(status))continue;
+    if(status>=proto.WebMessageInfo.Status.DELIVERY_ACK){record.stage='delivered';record.submitted=true;completed.set(record.jobId,Date.now());while(completed.size>200)completed.delete(completed.keys().next().value);otpMessages.delete(id);dispatchState(record,'delivered');changed=true;}
+    else if(status===proto.WebMessageInfo.Status.ERROR&&record.stage!=='delivered'){record.stage='failed';otpMessages.delete(id);dispatchState(record,'failed');changed=true;}
+  }
+  if(changed)void persist().then(flushReceiptAcks).catch(()=>{});
 }
 function stopConnection(message='Ponte pausada. Clique em Gerar QR / conectar para retomar.'){
   started=false;clearTimeout(reconnecting);reconnecting=null;qrValue='';qrImage=null;const old=socket;socket=null;old?.end(new Error('Ponte pausada pelo operador.'));setState({status:'paused',connected:false,qrAvailable:false,message});void heartbeat(false);
@@ -97,10 +161,11 @@ async function incoming(event,sock){
 async function connect(){
   if(stopping||socket)return;
   started=true;setState({status:'connecting',connected:false,message:'Conectando ao WhatsApp para gerar o QR…'});
-  const sock=makeWASocket({auth:authentication,logger,browser:['ZapDMR','Chrome','1.0.0'],printQRInTerminal:false,syncFullHistory:false,shouldSyncHistoryMessage:()=>false,markOnlineOnConnect:false,emitOwnEvents:false,getMessage:async()=>undefined,generateHighQualityLinkPreview:false,connectTimeoutMs:20000,defaultQueryTimeoutMs:20000,shouldIgnoreJid:jid=>jid.endsWith('@g.us')||jid.endsWith('@broadcast')});
+  const sock=makeWASocket({auth:authentication,logger,browser:['ZapDMR','Chrome','1.0.0'],printQRInTerminal:false,syncFullHistory:false,shouldSyncHistoryMessage:()=>false,markOnlineOnConnect:false,emitOwnEvents:false,getMessage:async key=>{pruneDispatches();return otpMessages.get(String(key.id||''))?.message;},generateHighQualityLinkPreview:false,connectTimeoutMs:20000,defaultQueryTimeoutMs:20000,shouldIgnoreJid:jid=>jid.endsWith('@g.us')||jid.endsWith('@broadcast')});
   socket=sock;
   sock.ev.on('creds.update',update=>{Object.assign(auth.creds,update);void persist().catch(()=>{});});
   sock.ev.on('messages.upsert',event=>{void incoming(event,sock).catch(()=>{});});
+  sock.ev.on('messages.update',updates=>receiveDeliveryUpdates(updates,sock));
   sock.ev.on('connection.update',update=>{void (async()=>{
     if(socket!==sock||stopping)return;
     if(update.qr){qrValue=update.qr;const image=await QRCode.toBuffer(qrValue,{type:'png',errorCorrectionLevel:'M',width:420,margin:3});if(socket!==sock)return;qrImage=image;setState({status:'qr',connected:false,qrAvailable:true,message:'No WhatsApp do número indicado, abra Aparelhos conectados → Conectar aparelho e escaneie o QR.'});}
@@ -128,12 +193,32 @@ async function poll(){
       if(!state.connected||!socket)break;
       const id=String(job.id||''),number=String(job.number||''),text=String(job.text||''),leaseId=String(job.leaseId||'');
       if(!/^[A-Za-z0-9_-]{1,100}$/.test(id)||!/^[A-Za-z0-9_-]{1,128}$/.test(leaseId)||!/^[+][1-9]\d{7,14}$/.test(number)||!otpText.test(text)){if(id&&leaseId)await api('/v1/whatsapp/bridge/ack',{id,status:'failed',leaseId}).catch(()=>{});continue;}
-      if(completed.has(id)){await api('/v1/whatsapp/bridge/ack',{id,status:'sent',leaseId}).catch(()=>{});continue;}
+      if(completed.has(id)){
+        const prior=[...dispatches.values()].find(record=>record.jobId===id);
+        if(prior){if(prior.leaseId!==leaseId){prior.leaseId=leaseId;prior.submissionAcked=false;prior.receiptAcked=null;await persist();}await flushReceiptAcks();}
+        else await api('/v1/whatsapp/bridge/ack',{id,status:'sent',leaseId}).catch(()=>{});
+        continue;
+      }
+      let record,messageId;
       try{
-        await socket.sendMessage(number.slice(1)+'@s.whatsapp.net',{text});
+        const sendingSocket=socket,destination=await resolveDestination(sendingSocket,number);
+        if(socket!==sendingSocket||!state.connected)throw new Error('Conexão alterada durante a resolução.');
+        // Pre-register the exact ID so receipts that precede sendMessage's
+        // resolution cannot be lost or race the submission ACK.
+        messageId=generateMessageIDV2(sendingSocket.user?.id);
+        record={jobId:id,leaseId,at:Date.now(),route:destination.route,stage:'pending',submitted:false,submissionFinished:false,submissionAcked:false,receiptAcked:null};
+        dispatches.set(messageId,record);rememberOtp(messageId,{conversation:text});await persist();
+        const sent=await sendingSocket.sendMessage(destination.jid,{text},{messageId});
+        if(sent?.message&&record.stage!=='delivered'&&record.stage!=='failed')rememberOtp(messageId,sent.message);
+        record.submitted=true;record.submissionFinished=true;if(record.stage==='pending')record.stage='submitted';
+        dispatchState(record,record.stage);
         completed.set(id,Date.now());for(const [key,at]of completed)if(at<Date.now()-86400000)completed.delete(key);while(completed.size>200)completed.delete(completed.keys().next().value);
-        await persist();await api('/v1/whatsapp/bridge/ack',{id,status:'sent',leaseId});
-      }catch{if(!completed.has(id))await api('/v1/whatsapp/bridge/ack',{id,status:'failed',leaseId}).catch(()=>{});setState({message:'Houve uma falha de entrega ou confirmação. A fila será consultada novamente.'});}
+        await persist();await flushReceiptAcks();
+      }catch{
+        if(record){record.submissionFinished=true;if(record.stage!=='delivered')record.stage='failed';if(messageId)otpMessages.delete(messageId);dispatchState(record,record.stage);await persist().catch(()=>{});await flushReceiptAcks();}
+        else{dispatchState({route:sameOfficialNumber(number)?'self':'lookup'},'failed');await api('/v1/whatsapp/bridge/ack',{id,status:'failed',leaseId}).catch(()=>{});}
+        setState({message:'Não foi possível concluir o envio. O servidor será atualizado sem reenviar esta mensagem automaticamente.'});
+      }
     }
   }catch{setState({message:'WhatsApp conectado. A fila do servidor está indisponível; tentando novamente.'});}
   finally{polling=false;}
@@ -162,7 +247,7 @@ const server=http.createServer(async(req,res)=>{
   return response(404,'text/plain; charset=utf-8','Recurso não encontrado.');
 });
 server.headersTimeout=10000;server.requestTimeout=15000;
-const pollTimer=setInterval(()=>{if(state.connected)void poll();},5000);
+const pollTimer=setInterval(()=>{pruneDispatches();void flushReceiptAcks();if(state.connected)void poll();},5000);
 server.on('error',async()=>{clearInterval(pollTimer);await lock.close().catch(()=>{});await fs.unlink(lockPath).catch(()=>{});operationalLog('Não foi possível abrir o painel local da ponte.');process.exit(1);});
 server.listen(port,host,()=>{
   operationalLog(`ZapDMR WhatsApp: ${localOrigin}`);

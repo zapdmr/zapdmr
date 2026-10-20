@@ -22,9 +22,22 @@ A ponte usa Baileys como cliente de aparelho vinculado; ela não é uma integra�
 ### Fila de envio e fallback
 
 1. Com a sessão oficial conectada e o heartbeat recente, a API escolhe `mode: "bridge"`, cria o desafio e coloca na fila D1 somente o payload cifrado de uma mensagem OTP. A resposta pública informa `queued: true` e `sent: false`; não revela o código.
-2. A ponte consulta `/v1/whatsapp/bridge/outbox` por HTTPS de saída. O Worker reserva trabalhos com lease; a ponte envia o texto e confirma o resultado em `/v1/whatsapp/bridge/ack`, repetindo o `leaseId` recebido. Nenhuma porta pública de entrada é necessária no computador.
-3. Se a ponte confirma o envio, o usuário digita no portal ou no aplicativo os seis dígitos recebidos no seu WhatsApp. A API confere o HMAC e consome o desafio antes de liberar a sessão e o link de download.
-4. Se o envio falha, ou a ponte deixa de estar disponível e a tentativa expira, o Worker muda o desafio para `reverse`. `/v1/auth/status` inclui o desafio atualizado; a interface mostra o botão verde com a mensagem pronta para o número oficial. Sem uma ponte receptora conectada, essa alternativa continuará pendente até o serviço ser restabelecido.
+2. A ponte consulta `/v1/whatsapp/bridge/outbox` por HTTPS de saída. O Worker reserva trabalhos com lease; a ponte envia o texto e informa os estados em `/v1/whatsapp/bridge/ack`, repetindo o `leaseId` recebido. Nenhuma porta pública de entrada é necessária no computador.
+3. ACK `sent` significa que a mensagem foi encaminhada pela sessão, sem comprovar recebimento no telefone. ACK `delivered` só é enviado quando a ponte recebe o recibo correspondente do WhatsApp. O lease é preservado para esse avanço; uma resposta atrasada de outra tentativa não pode substituir o estado atual, e `sent` não rebaixa `delivered`.
+4. O usuário digita no portal ou no aplicativo os seis dígitos que efetivamente recebeu. A API confere o HMAC e consome o desafio antes de liberar a sessão e o link de download. Nem o ACK `sent` nem o recibo `delivered` validam o OTP automaticamente.
+5. Se o envio falha, ou a ponte deixa de estar disponível e a tentativa expira, o Worker pode mudar o desafio para `reverse`. `/v1/auth/status` inclui o desafio atualizado; a interface mostra o botão verde com a mensagem pronta para o número oficial. Sem uma ponte receptora conectada, essa alternativa continuará pendente até o serviço ser restabelecido. **O próprio número oficial não recebe esse fallback:** mensagens `fromMe` não servem como prova reversa. Nesse caso, o usuário recebe orientação para reenviar e consultar o aparelho principal, sem código exposto ou aprovação por pareamento.
+
+O desafio `bridge` distingue `deliveryStatus` (`queued`, `sending`, `sent`, `delivered` ou `failed`), além de `queued`, `sent` e `delivered`. O campo `sent` continua verdadeiro para submissão ou entrega por compatibilidade; somente `delivered: true` indica que o recibo automático foi registrado. Isso ainda não significa leitura humana nem confirmação do cadastro.
+
+### Correção de destino e revisão r2
+
+A ponte resolve o JID canônico antes de enviar. Para o próprio número oficial, usa a identidade PN da sessão conectada; para outros números, consulta `onWhatsApp` e aceita somente o número informado ou seu alias móvel brasileiro específico com/sem nono dígito. A revisão também fornece `getMessage` ao protocolo, com cache em memória limitado a 100 mensagens OTP por dez minutos, para atender retransmissões sem registrar códigos em logs ou em texto aberto no disco.
+
+Em 20/10/2026, a correção da API foi publicada no deploy Cloudflare `29f0793e-185e-44ba-9e83-c52491cc725a`, e a ponte retomou conectada. Um pedido real foi reenviado no mesmo cadastro; o painel registrou rota `self` e etapa `submitted`. O titular confirmou que a mensagem apareceu e digitou pessoalmente o código no site. O portal exibiu **WhatsApp confirmado**, **Número confirmado nesta sessão** e o botão **Baixar Android (.apk)**, com download solicitado. A consulta restrita do D1 confirmou registro e usuário com `whatsapp_verified=1`, método `bridge` e uma sessão ativa. Nenhum OTP ou token foi lido para essa conferência.
+
+Esse fluxo comprova recebimento humano, digitação do código pelo titular, perfil verificado e download liberado. Não foi registrado recibo automático `delivered` para o envio a si mesmo; o diagnóstico da ponte continua `submitted`. Também não foram comprovados o término do download do arquivo, instalação do APK, ativação da comunidade dentro do aplicativo ou conversa entre duas contas. Essas etapas e evidências permanecem distintas.
+
+O pacote do site com sufixo `1.3.1-r2` será adicionado à Release para conservar essa correção e sua documentação, sem substituir os assets originais 1.3.1. O empacotamento usa `package-site-cloudflare.ps1 -Revision r2`; a presença do ZIP não substitui a validação real do cadastro.
 
 O painel local somente controla a ponte em loopback. A autenticação dos endpoints de fila, heartbeat, ACK e recepção usa `Authorization: Bearer <WHATSAPP_WEBHOOK_TOKEN>`. Não publique essa porta, o token, os arquivos DPAPI ou o QR. O envio externo não tem garantia de exatamente uma entrega; os leases, ACKs e a deduplicação local reduzem mensagens repetidas.
 
@@ -56,7 +69,7 @@ WHATSAPP_CONFIRM_NUMBER=+5543996741200
 WHATSAPP_WEBHOOK_TOKEN=segredo-aleatorio-com-pelo-menos-32-caracteres
 ```
 
-Se o envio direto estiver ausente ou falhar, o portal mostra **Confirmar pelo meu WhatsApp**. O link `wa.me` contém uma mensagem pronta:
+Para números diferentes do receptor oficial, quando o envio direto estiver ausente ou falhar e o modo reverso estiver disponível, o portal mostra **Confirmar pelo meu WhatsApp**. O link `wa.me` contém uma mensagem pronta:
 
 ```text
 ZapDMR CONFIRMAR <desafio-aleatorio-de-43-caracteres> <codigo-de-6-digitos>
@@ -74,12 +87,12 @@ Content-Type: application/json
 
 O remetente não pode ser obtido de um campo editável pelo usuário. O adaptador deve validar a assinatura ou autenticação do evento original antes de usar seu segredo para chamar o ZapDMR. O endpoint não é um formulário público. Ele compara remetente, desafio, código, prazo e tentativas. Só então registra a confirmação recebida. O portal consulta o estado e conclui a validação. Abrir o WhatsApp, exibir um código ou clicar em um botão não confirma um número.
 
-Esse modo ainda exige um receptor conectado ao WhatsApp. O link `wa.me` sozinho não recebe mensagens no servidor. Quando número e segredo reversos estão configurados, a API pode oferecer o desafio `reverse` mesmo com a ponte desconectada; ele continuará pendente até o receptor receber e encaminhar a mensagem. Se nenhuma forma de confirmação estiver configurada, o estado será `unavailable`. Em ambos os casos, a interface não inventa uma validação.
+Esse modo ainda exige um receptor conectado ao WhatsApp. O link `wa.me` sozinho não recebe mensagens no servidor. Quando número e segredo reversos estão configurados, a API pode oferecer o desafio `reverse` mesmo com a ponte desconectada; ele continuará pendente até o receptor receber e encaminhar a mensagem. Para o próprio número oficial, o servidor retorna `unavailable` orientativo quando só restaria confirmação reversa, e não expõe o código nem o link de autoconfirmação. Se nenhuma forma de confirmação estiver configurada, o estado também será `unavailable`. A interface não inventa uma validação.
 
 ## Contrato do portal e do aplicativo
 
 1. `POST /v1/registrations` recebe `{callsign,dmrId,whatsapp,platform,noticeAccepted:true,sharePhone,requestVerification:true}`. Retorna `registrationId`, `verificationRequired:true`, `downloadUrl:null` e `challenge`.
-2. O desafio informa `mode` (`direct`, `bridge`, `reverse`, `development` ou `unavailable`), `sent`, `expiresInSeconds`, `retryAfterSeconds`, `message` e, quando aplicável, `challengeToken`. `bridge` pode informar `queued`; nunca expõe o código. Em confirmação reversa também inclui `whatsappUrl` e `displayCode`.
+2. O desafio informa `mode` (`direct`, `bridge`, `reverse`, `development` ou `unavailable`), `sent`, `expiresInSeconds`, `retryAfterSeconds`, `message` e, quando aplicável, `challengeToken`. `bridge` também informa estado de envio, `queued` e `delivered`; nunca expõe o código. Em confirmação reversa, para número elegível, inclui `whatsappUrl` e `displayCode`.
 3. `POST /v1/auth/request-code` com `{registrationId}` solicita reenvio após 60 segundos e retorna um novo desafio.
 4. `POST /v1/auth/status` recebe `{registrationId,challengeToken}` e retorna `status` (`pending`, `confirmed` ou `expired`), contadores atualizados e o `challenge` atual. Assim a interface acompanha o fallback de `bridge` para `reverse`. No modo reverso, `confirmed` significa que o webhook confiável recebeu a mensagem correta. Portal e aplicativo consultam a cada quatro segundos enquanto a etapa de confirmação está visível; `retryAfterSeconds` controla somente o reenvio, e respostas de erro podem ampliar a espera.
 5. `POST /v1/auth/verify` recebe `{registrationId,code,challengeToken}`. O modo reverso exige confirmação prévia no webhook. Na conclusão, o código é consumido; a API retorna uma sessão de 30 dias, usuário e URL de download assinada por 15 minutos quando o instalador estiver disponível.

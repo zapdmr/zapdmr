@@ -25,10 +25,13 @@ Se vincular outro número, a ponte se interrompe e preserva a sessão cifrada. E
 ## Operação
 
 - Após conexão correta, consulta `/v1/whatsapp/bridge/outbox` a cada cinco segundos, com o token em `Authorization: Bearer` e `{number,connected:true}`. A fila entrega até cinco trabalhos; a ponte aceita apenas texto no formato OTP do ZapDMR e números E.164.
-- Envia `{id,status:"sent",leaseId}` ou `{id,status:"failed",leaseId}` para `/v1/whatsapp/bridge/ack`, repetindo o `leaseId` da consulta da fila. Uma confirmação atrasada não encerra a tentativa seguinte. Mantém uma lista cifrada limitada aos últimos 200 IDs enviados para reduzir duplicação em uma nova consulta. Uma interrupção no momento exato do envio ainda pode causar entrega duplicada; não há garantia de exatamente uma entrega no protocolo externo.
+- Resolve o destino antes de enviar: para o próprio número oficial, usa o JID PN canônico da sessão conectada; para outro número, consulta `onWhatsApp` e aceita somente a identidade correspondente ao número informado ou ao alias móvel brasileiro específico com/sem nono dígito. Não interpreta dígitos de um LID como telefone.
+- Envia `{id,status:"sent",leaseId}` após a submissão pela sessão. Esse ACK significa **encaminhado**, sem afirmar entrega no telefone. Recibos `DELIVERY_ACK` ou superiores geram `{id,status:"delivered",leaseId}`; uma falha gera `{id,status:"failed",leaseId}`. A ponte mantém o mesmo lease e envia a submissão antes do recibo, inclusive quando o evento de entrega chega antes de `sendMessage` terminar.
+- O Worker mantém `lease_id` depois de `sent` para aceitar o recibo posterior da mesma tentativa. ACKs de outro lease são ignorados; `sent` não rebaixa `delivered`. Mantém-se uma lista cifrada limitada aos últimos 200 IDs enviados para reduzir duplicação. Uma interrupção no momento exato do envio ainda pode causar mensagem repetida; não há garantia de exatamente uma entrega no protocolo externo.
+- Fornece `getMessage` ao protocolo com um cache em memória de no máximo 100 mensagens OTP por dez minutos. O cache permite retransmissão do conteúdo necessário pelo WhatsApp e é removido por expiração, entrega ou falha; os corpos não são registrados em logs nem persistidos em texto aberto.
 - Informa conexão/desconexão em `/v1/whatsapp/bridge/heartbeat`. O endpoint outbox também mantém o estado vivo. O Worker precisa fornecer essas três rotas autenticadas e o mecanismo da fila.
 - Recebe apenas mensagens novas diretas de remetentes externos cujo texto corresponda exatamente a `ZapDMR CONFIRMAR <43 caracteres do desafio> <6 dígitos>`. Extrai o número da identidade PN do WhatsApp, nunca dos dígitos de um LID, e envia `{number,text}` para `/v1/whatsapp/webhook`. O Worker confere desafio, número, validade e código.
-- Ignora mensagens próprias, grupos, broadcasts, anexos e sincronização de histórico. Não arquiva conversas nem contatos. Baileys ainda precisa processar material de protocolo em memória para manter a sessão autenticada.
+- Ignora mensagens próprias na confirmação reversa, além de grupos, broadcasts, anexos e sincronização de histórico. Não arquiva conversas nem contatos; mantém apenas o cache temporário de OTP e os metadados de envio descritos acima. Baileys ainda precisa processar material de protocolo em memória para manter a sessão autenticada.
 - **Pausar ponte** fecha a conexão sem excluir a sessão. Para retomar no mesmo painel, clique em conectar. Ao reiniciar o processo, uma sessão já vinculada ao número correto pode ser retomada sem novo QR.
 
 ## Proteção e limites
@@ -37,7 +40,15 @@ O painel escuta somente em `127.0.0.1:4193`, valida `Host`, usa CSP, não permit
 
 As credenciais Baileys, chaves Signal e IDs de entrega ficam no arquivo `session.dpapi`, cifrado por DPAPI CurrentUser. A gravação é serializada e substitui atomicamente um arquivo cifrado temporário. Não existe credencial em texto no disco. A ponte não usa `useMultiFileAuthState`, que grava arquivos de autenticação em JSON; implementa o estado de chaves com a serialização `BufferJSON` e conversão de chaves de sincronização exigidas pela biblioteca. O token de acesso fica somente em memória após abrir a configuração protegida. O logger Baileys é silencioso, e a saída interna de libsignal também é silenciada para impedir dumps de material de sessão. Não são exibidos tokens, QR bruto, números de destinatários, códigos ou corpos de mensagens em logs.
 
-É necessário manter o Worker configurado e o aparelho vinculado. Um QR na tela ainda não demonstra envio real. A confirmação de entrega e o primeiro cadastro com um número real precisam ser observados após o responsável escanear o QR. Não use códigos de homologação como prova de posse de um número real.
+É necessário manter o Worker configurado e o aparelho vinculado. Um QR na tela não demonstra envio real. ACK `sent`, recibo `delivered`, relato humano de recebimento e validação do OTP são evidências diferentes: nenhum estado de entrega aprova o cadastro automaticamente. O próprio número oficial não tem fallback de confirmação reversa, pois mensagens `fromMe` são ignoradas; ele precisa receber e digitar um código real no aparelho principal. Não use códigos expostos ou homologação como prova de posse de um número real.
+
+## Registro da revisão r2 — 20/10/2026
+
+A API foi publicada no deploy `29f0793e-185e-44ba-9e83-c52491cc725a`. A ponte reiniciada retomou `connected: true`, e um reenvio real no mesmo cadastro registrou `lastDispatch.route: "self"` e `stage: "submitted"`. O titular confirmou o recebimento e digitou pessoalmente o código no site. O portal exibiu **WhatsApp confirmado**, o número confirmado na sessão e **Baixar Android (.apk)**, com download solicitado. A consulta restrita do D1 confirmou registro e usuário verificados, método `bridge` e uma sessão ativa, sem leitura de OTP ou token.
+
+O fluxo real de recebimento humano, validação do código e liberação do download foi confirmado. O estado técnico permanece `submitted`, sem recibo automático de entrega registrado para esse envio a si mesmo. Não foram comprovados o término do download, instalação do APK, ativação da comunidade no app, conversa entre duas contas ou RX/TX físico de rádio.
+
+O pacote do site `1.3.1-r2` será anexado à Release, preservando os assets originais. Esta atualização corrige a entrega e o diagnóstico da ponte; não altera os aplicativos já publicados nem transforma o pareamento em validação de usuário.
 
 ## Referências upstream consultadas
 

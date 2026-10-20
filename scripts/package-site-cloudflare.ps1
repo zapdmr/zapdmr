@@ -1,11 +1,14 @@
+param([string]$Revision = '')
 $ErrorActionPreference = 'Stop'
+if ($Revision -and $Revision -notmatch '^r[1-9][0-9]*$') { throw 'Revisão inválida; use r2, r3, etc.' }
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $releaseVersion = [string](Get-Content -LiteralPath (Join-Path $projectRoot 'package.json') -Raw | ConvertFrom-Json).version
 if ($releaseVersion -notmatch '^\d+\.\d+\.\d+$') { throw 'Versão de release inválida.' }
 $siteRoot = Join-Path $projectRoot 'site'
 $releaseDir = Join-Path $projectRoot 'release'
 New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
-$destination = Join-Path $releaseDir "ZapDMR-Site-Cloudflare-$releaseVersion.zip"
+$packageVersion = if ($Revision) { "$releaseVersion-$Revision" } else { $releaseVersion }
+$destination = Join-Path $releaseDir "ZapDMR-Site-Cloudflare-$packageVersion.zip"
 Add-Type -AssemblyName System.IO.Compression
 $stream = [IO.File]::Open($destination, [IO.FileMode]::Create)
 $archive = [IO.Compression.ZipArchive]::new($stream, [IO.Compression.ZipArchiveMode]::Create, $false)
@@ -31,5 +34,5 @@ try {
     }
 } finally { $archive.Dispose(); $stream.Dispose() }
 $checksum = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant()
-Set-Content -LiteralPath (Join-Path $releaseDir "SHA256SUMS-Site-Cloudflare-$releaseVersion.txt") -Value ($checksum + '  ' + [IO.Path]::GetFileName($destination)) -Encoding utf8
+Set-Content -LiteralPath (Join-Path $releaseDir "SHA256SUMS-Site-Cloudflare-$packageVersion.txt") -Value ($checksum + '  ' + [IO.Path]::GetFileName($destination)) -Encoding utf8
 Get-Item -LiteralPath $destination | Select-Object FullName,Length

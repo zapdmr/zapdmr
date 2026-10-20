@@ -195,6 +195,10 @@
       const data = await post('/v1/auth/status', {registrationId: flow.registrationId, challengeToken: flow.challengeToken});
       if (flow !== pending || flow.complete) return;
       if (flow.busy) return;
+      if (data.challenge?.mode === 'unavailable') {
+        applyChallenge(data.challenge, flow, true);
+        return;
+      }
       if (data.status === 'confirmed') {
         if (flow.mode === 'reverse') await completeVerification(flow, flow.displayCode);
         return;
@@ -210,7 +214,10 @@
         applyChallenge(data.challenge, flow, true);
         return;
       }
-      if (flow.mode === 'bridge' && data.challenge?.sent) report('Código enviado pelo WhatsApp. Digite os seis dígitos recebidos.');
+      if (flow.mode === 'bridge' && data.challenge?.mode === 'bridge') {
+        const message = typeof data.challenge.message === 'string' && data.challenge.message.length <= 500 ? data.challenge.message : '';
+        report(message || (data.challenge.sent ? 'Encaminhado ao WhatsApp; aguardando entrega.' : 'Aguardando o envio pela ponte WhatsApp.'), data.challenge.deliveryStatus === 'failed');
+      }
       // retryAfterSeconds controls code resends; confirmation polls have their own cadence.
       delay = 4000;
       if (manual) report('Ainda aguardamos a mensagem do seu número. Abra o WhatsApp, envie a mensagem preparada e aguarde a confirmação.');

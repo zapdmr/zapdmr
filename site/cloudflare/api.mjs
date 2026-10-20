@@ -115,13 +115,27 @@ async function verificationMode(config,env){
 async function bridgeAuth(config,env,request){const expected=String(env.WHATSAPP_WEBHOOK_TOKEN||'');if(expected.length<32)throw failure(503,'Configure o segredo privado da ponte WhatsApp.');const supplied=(request.headers.get('Authorization')||'').replace(/^Bearer /,'');if(supplied.length>256||!await sameHash(config,'whatsapp-bridge:'+supplied,await hash(config,'whatsapp-bridge:'+expected)))throw failure(401,'Autenticação da ponte necessária.');}
 async function assertIdentity(config,row){const prior=await config.db.prepare('SELECT * FROM users WHERE callsign=? OR dmr_id=? LIMIT 1').bind(row.callsign,row.dmr_id).first();if(prior&&(prior.phone_hash!==row.phone_hash||prior.callsign!==row.callsign||prior.dmr_id!==row.dmr_id))throw failure(409,'Este indicativo já possui uma conta. Use o número existente ou contacte o responsável.');return prior;}
 function phoneVariants(number){const digits=number.slice(1),variants=[number];if(/^55\d{2}[6-9]\d{7}$/.test(digits))variants.push('+'+digits.slice(0,4)+'9'+digits.slice(4));if(/^55\d{2}9[6-9]\d{7}$/.test(digits))variants.push('+'+digits.slice(0,4)+digits.slice(5));return variants;}
+async function isOfficialPhoneHash(config,env,phoneHash){const official=reverseNumber(env);if(!official||!phoneHash)return false;const candidates=await Promise.all(phoneVariants(official).map(number=>hash(config,number)));return candidates.includes(phoneHash);}
+function officialConfirmationUnavailable(){return {mode:'unavailable',sent:false,delivered:false,expiresInSeconds:600,retryAfterSeconds:60,message:'A confirmação do número oficial exige a ponte conectada e o código recebido no aparelho principal. A confirmação reversa para o próprio número não está disponível. Aguarde a conexão e use Reenviar código.'};}
 async function challengeView(config,env,codeRow,plain){
   const now=Date.now(),mode=codeRow.mode,result={mode,sent:mode==='direct',expiresInSeconds:Math.max(0,Math.ceil((codeRow.expires_at-now)/1000)),retryAfterSeconds:Math.max(0,Math.ceil((codeRow.requested_at+60000-now)/1000)),challengeToken:plain.token};
   if(mode==='reverse'){
+    const registration=codeRow.phone_hash?codeRow:await config.db.prepare('SELECT phone_hash FROM registrations WHERE id=?').bind(codeRow.registration_id).first();
+    if(await isOfficialPhoneHash(config,env,registration?.phone_hash))return {...result,...officialConfirmationUnavailable()};
     result.displayCode=plain.code;
     result.whatsappUrl='https://wa.me/'+reverseNumber(env).slice(1)+'?text='+encodeURIComponent(`ZapDMR CONFIRMAR ${plain.token} ${plain.code}`);
     result.message='Envie a mensagem pelo WhatsApp do número cadastrado. A confirmação acontece após a ponte receber e conferir o remetente.';
-  }else if(mode==='bridge'){const job=await config.db.prepare('SELECT status FROM whatsapp_outbox WHERE registration_id=? AND code_hash=? ORDER BY created_at DESC LIMIT 1').bind(codeRow.registration_id,codeRow.hash).first();result.sent=job?.status==='sent';result.queued=!result.sent;result.message=result.sent?'Código enviado pelo WhatsApp. Digite os seis dígitos recebidos.':'Código na fila da ponte WhatsApp. Aguarde o recebimento no número cadastrado.';}
+  }else if(mode==='bridge'){
+    const job=await config.db.prepare('SELECT q.status,q.attempts,q.lease_until,r.phone_hash FROM whatsapp_outbox q JOIN registrations r ON r.id=q.registration_id WHERE q.registration_id=? AND q.code_hash=? ORDER BY q.created_at DESC LIMIT 1').bind(codeRow.registration_id,codeRow.hash).first();
+    const status=job?.status||'queued';
+    result.deliveryStatus=status;result.sent=['sent','delivered'].includes(status);result.delivered=status==='delivered';result.queued=['queued','sending'].includes(status);
+    if(result.delivered)result.message='O WhatsApp confirmou o recebimento do código. Digite os seis dígitos recebidos na mensagem.';
+    else if(status==='sent')result.message='Código encaminhado ao WhatsApp; a entrega no telefone ainda não foi confirmada. Se não chegar, use Reenviar código após o contador.';
+    else if(status==='failed'||status==='sending'&&job.attempts>=2&&job.lease_until<now){
+      const official=await isOfficialPhoneHash(config,env,job?.phone_hash);
+      result.message=official?'Não foi possível confirmar a entrega ao WhatsApp do número oficial. Use Reenviar código após o contador e confira as mensagens no aparelho principal. A confirmação reversa para o próprio número não está disponível.':'Não foi possível confirmar o envio do código. Use Reenviar código após o contador.';
+    }else result.message=status==='sending'?'A ponte está encaminhando o código ao WhatsApp. Ainda não há confirmação de entrega.':'Código na fila da ponte WhatsApp. Aguarde o recebimento no número cadastrado.';
+  }
   else result.message='Código enviado ao número cadastrado. Expira em 10 minutos.';
   return result;
 }
@@ -131,6 +145,7 @@ async function issueChallenge(config,env,request,row){
   if(prior&&prior.requested_at+60000>now)throw failure(429,'Aguarde para reenviar o código.',{retryAfterSeconds:Math.ceil((prior.requested_at+60000-now)/1000)});
   let mode=await verificationMode(config,env);
   if(mode==='unavailable')return {mode,sent:false,expiresInSeconds:600,retryAfterSeconds:60,message:'A confirmação aguarda a conexão do WhatsApp oficial. O número ainda não foi validado.'};
+  if(mode==='reverse'&&await isOfficialPhoneHash(config,env,row.phone_hash))return officialConfirmationUnavailable();
   await rate(config,request,'otp-phone',1,60000,row.phone_hash);
   const plain={code:otpCode(),token:randomToken()},codeHash=await hash(config,row.id+':'+plain.code),challengeHash=await hash(config,'otp-challenge:'+plain.token),cipher=await seal(config,JSON.stringify(plain));
   await config.db.batch([
@@ -138,7 +153,11 @@ async function issueChallenge(config,env,request,row){
     config.db.prepare(`INSERT INTO codes(registration_id,hash,expires_at,attempts,requested_at,mode,challenge_hash,challenge_cipher,reverse_confirmed_at) VALUES(?,?,?,0,?,?,?,?,NULL)
       ON CONFLICT(registration_id) DO UPDATE SET hash=excluded.hash,expires_at=excluded.expires_at,attempts=0,requested_at=excluded.requested_at,mode=excluded.mode,challenge_hash=excluded.challenge_hash,challenge_cipher=excluded.challenge_cipher,reverse_confirmed_at=NULL`).bind(row.id,codeHash,now+600000,now,mode,challengeHash,cipher)
   ]);
-  if(mode==='direct')try{await deliverCode(config,env,request,row,plain.code);}catch(error){if(!reverseConfigured(env)){await config.db.prepare('DELETE FROM codes WHERE registration_id=? AND hash=?').bind(row.id,codeHash).run();return {mode:'unavailable',sent:false,expiresInSeconds:600,retryAfterSeconds:60,message:error.message};}mode='reverse';await config.db.prepare("UPDATE codes SET mode='reverse' WHERE registration_id=? AND hash=?").bind(row.id,codeHash).run();}
+  if(mode==='direct')try{await deliverCode(config,env,request,row,plain.code);}catch(error){
+    const official=await isOfficialPhoneHash(config,env,row.phone_hash);
+    if(!reverseConfigured(env)||official){await config.db.prepare('DELETE FROM codes WHERE registration_id=? AND hash=?').bind(row.id,codeHash).run();return official?officialConfirmationUnavailable():{mode:'unavailable',sent:false,expiresInSeconds:600,retryAfterSeconds:60,message:error.message};}
+    mode='reverse';await config.db.prepare("UPDATE codes SET mode='reverse' WHERE registration_id=? AND hash=?").bind(row.id,codeHash).run();
+  }
   if(mode==='bridge')await config.db.prepare('INSERT INTO whatsapp_outbox(id,registration_id,code_hash,payload_cipher,status,created_at,expires_at) VALUES(?,?,?,?,?,?,?)').bind(crypto.randomUUID(),row.id,codeHash,await seal(config,JSON.stringify({number:await unseal(config,row.phone_cipher),text:otpMessage(row.callsign,plain.code)})),'queued',now,now+600000).run();
   return challengeView(config,env,{registration_id:row.id,hash:codeHash,requested_at:now,expires_at:now+600000,mode},plain);
 }
@@ -171,9 +190,15 @@ async function api(request,env,url,config){
       return json(200,{jobs:await Promise.all(jobs.results.map(async job=>({id:job.id,leaseId:job.lease_id,...JSON.parse(await unseal(config,job.payload_cipher))})))});
     }
     if(route==='/v1/whatsapp/bridge/ack'){
-      if(!['sent','failed'].includes(raw.status)||!/^[-a-f0-9]{36}$/i.test(String(raw.id||''))||!/^[A-Za-z0-9_-]{43}$/.test(String(raw.leaseId||'')))throw failure(400,'Resultado de envio inválido.');
-      const job=await db.prepare('UPDATE whatsapp_outbox SET status=?,lease_until=0,lease_id=NULL WHERE id=? AND status=? AND lease_id=? RETURNING registration_id,code_hash').bind(raw.status,raw.id,'sending',raw.leaseId).first();
-      if(job&&raw.status==='failed'&&reverseConfigured(env))await db.prepare("UPDATE codes SET mode='reverse' WHERE registration_id=? AND hash=? AND mode='bridge'").bind(job.registration_id,job.code_hash).run();return json(200,{ok:true});
+      if(!['sent','delivered','failed'].includes(raw.status)||!/^[-a-f0-9]{36}$/i.test(String(raw.id||''))||!/^[A-Za-z0-9_-]{43}$/.test(String(raw.leaseId||'')))throw failure(400,'Resultado de envio inválido.');
+      // Retain the lease identity so a later delivery receipt can advance a submitted job.
+      // Terminal delivered/failed jobs and ACKs from previous leases cannot be overwritten.
+      const job=await db.prepare("UPDATE whatsapp_outbox SET status=?,lease_until=0 WHERE id=? AND status IN ('sending','sent') AND lease_id=? RETURNING registration_id,code_hash").bind(raw.status,raw.id,raw.leaseId).first();
+      if(job&&raw.status==='failed'&&reverseConfigured(env)){
+        const registration=await db.prepare('SELECT phone_hash FROM registrations WHERE id=?').bind(job.registration_id).first();
+        if(!await isOfficialPhoneHash(config,env,registration?.phone_hash))await db.prepare("UPDATE codes SET mode='reverse' WHERE registration_id=? AND hash=? AND mode='bridge'").bind(job.registration_id,job.code_hash).run();
+      }
+      return json(200,{ok:true});
     }
     return json(404,{message:'Recurso da ponte não encontrado.'});
   }
@@ -203,9 +228,12 @@ async function api(request,env,url,config){
   }
   if(route==='/v1/auth/status'&&method==='POST'){
     await rate(config,request,'otp-status',120);const raw=await body(request),token=String(raw.challengeToken||'');if(!/^[A-Za-z0-9_-]{43}$/.test(token))throw failure(400,'Confirmação inválida.');
-    const row=await db.prepare('SELECT * FROM codes WHERE registration_id=? AND challenge_hash=?').bind(String(raw.registrationId||''),await hash(config,'otp-challenge:'+token)).first();
+    const row=await db.prepare('SELECT c.*,r.phone_hash FROM codes c JOIN registrations r ON r.id=c.registration_id WHERE c.registration_id=? AND c.challenge_hash=?').bind(String(raw.registrationId||''),await hash(config,'otp-challenge:'+token)).first();
     if(!row||row.expires_at<=Date.now()||row.attempts>=5)return json(200,{status:'expired',expiresInSeconds:0,retryAfterSeconds:0});
-    if(row.mode==='bridge'&&Date.now()>row.requested_at+90000){const job=await db.prepare('SELECT status,attempts,lease_until FROM whatsapp_outbox WHERE registration_id=? AND code_hash=?').bind(row.registration_id,row.hash).first();if(job?.status!=='sent'&&(!await bridgeConnected(config,env)||job?.attempts>=2&&job.lease_until<Date.now())){await db.prepare("UPDATE codes SET mode='reverse' WHERE registration_id=? AND hash=?").bind(row.registration_id,row.hash).run();row.mode='reverse';}}
+    if(row.mode==='bridge'&&Date.now()>row.requested_at+90000&&reverseConfigured(env)&&!await isOfficialPhoneHash(config,env,row.phone_hash)){
+      const job=await db.prepare('SELECT status,attempts,lease_until FROM whatsapp_outbox WHERE registration_id=? AND code_hash=?').bind(row.registration_id,row.hash).first();
+      if(!['sent','delivered'].includes(job?.status)&&(!await bridgeConnected(config,env)||job?.attempts>=2&&job.lease_until<Date.now())){await db.prepare("UPDATE codes SET mode='reverse' WHERE registration_id=? AND hash=? AND mode='bridge'").bind(row.registration_id,row.hash).run();row.mode='reverse';}
+    }
     const plain=JSON.parse(await unseal(config,row.challenge_cipher)),challenge=await challengeView(config,env,row,plain);
     return json(200,{status:row.mode==='reverse'&&row.reverse_confirmed_at?'confirmed':'pending',expiresInSeconds:challenge.expiresInSeconds,retryAfterSeconds:challenge.retryAfterSeconds,challenge});
   }
