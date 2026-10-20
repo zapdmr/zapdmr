@@ -30,3 +30,12 @@ Adesão opcional no site, nunca pré-marcada. Cadastros antigos ficam desativado
 - Cloudflare D1: https://developers.cloudflare.com/d1/platform/limits/
 - Android audio focus: https://developer.android.com/media/optimize/audio-focus
 - BrandMeister TG dinâmica/estática: https://help.brandmeister.network/talk-groups/dynamic-vs-static/
+
+
+## Publicação confirmada
+
+Release pública beta v1.4.0 criada em https://github.com/zapdmr/zapdmr/releases/tag/v1.4.0, tag no commit c5d0a476d7c13627dc8fd2eb04e9972c65e49358. Seis arquivos carregados; tamanhos e SHA-256 dos instaladores e arquivos-fonte conferidos com os metadados GitHub. URLs dos instaladores e fontes responderam HTTP 200.
+
+Site/API 1.4.0 publicados em https://www.zapdmr.com.br. /healthz e /v1/status confirmaram a versão, anexos habilitados e limite de 15.728.640 bytes. Download de anexo sem Bearer respondeu 401. Ponte Windows reiniciada preservando DPAPI e retornou connected; PID da nova instância 20104.
+
+Consentimento de avisos conferido na tela de produção: checked=false, required=false. Nenhum formulário real foi submetido nesta verificação. Foram consultadas apenas contagens para conferir ausência de inscrição retroativa. A rotina horária descobre também releases beta publicadas, depois de conferir APK/EXE e os downloads atuais do portal.

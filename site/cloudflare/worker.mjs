@@ -1,7 +1,7 @@
 import {handleApi, handleDownload, cleanup, discoverReleaseNotifications} from './api.mjs';
 import {publicPagePaths, renderPublicPage, sitemap} from '../public-pages.mjs';
 
-const assetsVersion = '20261020-chat-1';
+const assetsVersion = '20261020-chat-2';
 const aliases = {
   '/downloads': '/#downloads', '/downloads/': '/#downloads',
   '/recursos': '/#recursos', '/recursos/': '/#recursos',
