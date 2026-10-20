@@ -20,6 +20,8 @@ Esses itens são constatações da revisão de código; não equivalem a testes 
 
 - O frontend e a API 1.3.1 foram publicados no Worker `zapdmr-community`, para `https://www.zapdmr.com.br`.
 - A primeira publicação OTP deste dia teve versão Cloudflare `590f8ea9-a786-464c-bfa5-539204dfa9c3`. Republicações posteriores de assets, polling ou URLs podem ter outro UUID; esse identificador registra a primeira publicação e não pretende representar o último deploy.
+- O deploy final registrado, com as URLs e os hashes da distribuição 1.3.1, é `5a792aa8-4193-41ec-8d8a-85ed89392c98`. `/v1/status` confirmou API 1.3.1, downloads atualizados e `bridgeConnected: true`.
+- `/healthz` respondeu HTTP 200 com `ok: true` e versão 1.3.1. Homepage, privacidade, termos e código-fonte tiveram disponibilidade HTTP 200 confirmada. A rota `/health` retorna 404 e não foi contabilizada como verificação de saúde bem-sucedida.
 - A migração remota D1 da atualização OTP concluiu 14 comandos. O banco é o existente `zapdmr-community`, binding `DB`, ID `6f272e21-de29-40a1-8bfd-801e00d2a95a`.
 - A origem pública, responsável e contato continuam os confirmados: Rizandro Cesar da Silva e rizandro@gmail.com.
 - O token privado da ponte foi preparado para o Worker e para configuração DPAPI CurrentUser. Seus valores não constam neste registro.
@@ -38,14 +40,26 @@ Esses itens são constatações da revisão de código; não equivalem a testes 
 
 O QR disponível, as credenciais configuradas e o processo aberto não comprovam entrega de OTP. O PC e a conexão precisam permanecer ativos para a ponte operar.
 
-## Builds locais
+## Builds e distribuição publicada
 
-| Arquivo | Tamanho observado |
+| Asset publicado | Tamanho confirmado por HEAD HTTP 200 |
 | --- | --- |
 | `release/ZapDMR-Android-1.3.1.apk` | 7.340.662 bytes |
 | `release/ZapDMR-Windows-1.3.1.exe` | 160.699.904 bytes |
+| `release/ZapDMR-Android-1.3.1-source.zip` | 50.921.123 bytes |
+| `release/ZapDMR-Site-Cloudflare-1.3.1.zip` | 219.395 bytes |
+| Arquivo de hashes SHA-256 | 383 bytes |
 
-Os arquivos 1.3.1 foram gerados localmente. APK, EXE, fontes correspondentes e hashes precisam estar na Release efetiva e ter suas URLs conferidas antes de anunciar a distribuição. A configuração de download pode permanecer em v1.3.0 durante essa atualização; existir um build local não demonstra sua publicação.
+A [Release v1.3.1](https://github.com/zapdmr/zapdmr/releases/tag/v1.3.1) foi publicada, com etiqueta no commit `005287f84f5c9503b1081b7cc05db347baa924db`. Há cinco assets enviados pelo projeto, além dos dois arquivos de fontes gerados automaticamente pelo GitHub. Os hashes informados pelo GitHub correspondem aos arquivos preparados localmente:
+
+```text
+178797625efb89c6ba7db77a160c239afe05c813ab6bc154c00b546fac957190  ZapDMR-Android-1.3.1.apk
+e6fcf60f6e96b618c07a5ebdf2f2e34269b2cd4e363b2210985455b027f81a8a  ZapDMR-Windows-1.3.1.exe
+8d1f63e770685bc7d5cb4938b42c8116ebebc631572f0b4d2c6dacc06335692e  ZapDMR-Android-1.3.1-source.zip
+f46853ae009140533c0462f94e00381e8ac48fc384efd912d01f40e2c8404af1  ZapDMR-Site-Cloudflare-1.3.1.zip
+```
+
+As URLs e os hashes da versão 1.3.1 estão ativos no Worker. A disponibilidade dos assets e da API está confirmada; a liberação do link pelo fluxo real de OTP ainda não foi comprovada. Estes registros foram atualizados depois do empacotamento, sem regenerar ou substituir os ZIPs publicados.
 
 O firmware autorizado é incluído nos pacotes locais e pode ser instalado no primeiro arranque ou restaurado por Ativar / Reparar vocoder sem internet. Esta revisão não comprovou RX/TX físico em aparelho.
 
@@ -58,4 +72,4 @@ O firmware autorizado é incluído nos pacotes locais e pode ser instalado no pr
 - As Releases públicas são acessíveis fora do formulário, e fontes GPL permanecem públicas. O formulário não garante cadastro de todos que recebam o instalador.
 - Polling de mensagens pode levar até 25 segundos e depende das cotas de Workers/D1. A ponte em polling também consome requisições e escritas.
 
-Próxima etapa concreta: observar a entrega/recepção de confirmação de um titular e a validação positiva no portal ou aplicativo, sem usar homologação como prova de posse do número. A ponte deve permanecer conectada durante esse fluxo.
+Próxima etapa concreta: o formulário do portal está preenchido na aba aberta para o titular ler e aceitar o aviso de privacidade, selecionar **Continuar** e digitar o código recebido no próprio WhatsApp. Ainda não foi observado esse fluxo positivo. A ponte deve permanecer conectada durante a entrega/recepção e a validação; homologação não substitui prova de posse do número.
