@@ -1,0 +1,6 @@
+{
+  "appId": "br.radio.zapdmr",
+  "appName": "ZapDMR",
+  "webDir": "web",
+  "server": { "androidScheme": "https" }
+}

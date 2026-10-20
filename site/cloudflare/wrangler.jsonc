@@ -1,0 +1,37 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "zapdmr-community",
+  "account_id": "affa3aa1350225291ef1a2f0139dfe10",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-19",
+  "workers_dev": true,
+  "preview_urls": false,
+  "routes": [
+    { "pattern": "www.zapdmr.com.br", "custom_domain": true },
+    { "pattern": "zapdmr.com.br", "custom_domain": true }
+  ],
+  "assets": {
+    "directory": "../public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/*", "!/site.js", "!/site.css", "!/ZapDMR.png"],
+    "html_handling": "none",
+    "not_found_handling": "none"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "zapdmr-community",
+      "database_id": "6f272e21-de29-40a1-8bfd-801e00d2a95a"
+    }
+  ],
+  "vars": {
+    "PUBLIC_ORIGIN": "https://www.zapdmr.com.br",
+    "OWNER_NAME": "Rizandro Cesar da Silva",
+    "PRIVACY_EMAIL": "rizandro@gmail.com",
+    "DOWNLOAD_ANDROID_URL": "",
+    "DOWNLOAD_WINDOWS_URL": "",
+    "SOURCE_URL": ""
+  },
+  "triggers": { "crons": ["0 * * * *"] },
+  "observability": { "enabled": false }
+}

@@ -1,0 +1,14 @@
+const fs = require('node:fs');
+const vm = require('node:vm');
+const assert = require('node:assert/strict');
+const context = { window: {} };
+vm.runInNewContext(fs.readFileSync('web/catalog-store.js', 'utf8'), context);
+const store = context.window.ZapDMRCatalog;
+assert.equal(store.bundled.length, 44);
+assert.equal(JSON.stringify(store.bundled), JSON.stringify(store.normalize(JSON.parse(fs.readFileSync('web/talkgroups-brasil.json')))));
+const groups = store.merge(store.bundled, [{id:'9990',name:'Teste',custom:true}, {id:'724', name:'Brasil'}]);
+assert.equal(groups.length, 45);
+assert.equal(groups.find(group => group.id === 9990).custom, true);
+assert.equal(groups.filter(group => group.id === 724).length, 1);
+assert.equal(store.normalize([{id:-1}, {id:'abc'}, {id:16777216}]).length, 0);
+console.log('PASS: embedded catalog, normalization, custom TG merge, duplicate and invalid IDs');

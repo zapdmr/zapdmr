@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#128c55"><title>ZapDMR</title>
+  <link rel="icon" href="/ZapDMR.png"><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/radio-console.css"><link rel="stylesheet" href="/community.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#"><img src="/ZapDMR.png" alt=""><span><b>ZapDMR</b><small>rádio digital, simples</small></span></a>
+    <div class="top-actions"><span id="badge" class="badge"><i></i> Inicializando</span>
+      <label class="theme">◐ <select id="theme" aria-label="Tema"><option value="auto">Automático</option><option value="light">Claro</option><option value="dark">Escuro</option></select></label>
+      <button id="jumpSettings" class="gear" aria-label="Configurações">⚙</button></div>
+  </header>
+  <main class="container">
+    <section id="screen-ptt" class="app-screen" data-screen-panel="ptt" aria-labelledby="pttScreenTitle">
+      <div class="ptt-layout">
+        <section class="card operation-card">
+          <div class="heading"><div><p class="kicker">OPERAÇÃO DE VOZ</p><h2 id="pttScreenTitle">TalkGroup ativa</h2></div><button id="favoriteSelected" class="star" type="button" title="Favoritar">☆</button></div>
+          <div class="selected"><i id="selectedActivityLed" class="activity-led" aria-label="Sem tráfego recente"></i><strong id="selectedId">TG 724</strong><div><b id="selectedName">Brasil Nacional</b><small id="selectedMeta">TS 1</small><small id="selectedCaller" class="activity-caller"></small></div><span id="selectedCategory" class="pill">Nacional</span></div>
+          <button id="pttScan" class="passive-scan-card" type="button" aria-pressed="false"><span>◉ Escuta passiva</span><b id="pttScanLabel">A procurar… · iniciar Scan</b><small>Troca automática: TG 4000 e ativação silenciosa da nova TG, sem microfone.</small></button><label class="quick-talkgroup">Sintonizar TalkGroup<select id="quickTalkgroupSelect" aria-label="Selecionar TalkGroup ativa"></select></label>
+          <button id="ptt" class="button ptt ptt-large" type="button" disabled>🎙 Preparar PTT</button>
+          <div id="audioMeters" class="audio-meter" aria-label="Medidores de modulação">
+            <div class="audio-meter-row" role="meter" aria-label="Modulação TX" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><b>TX</b><div id="txAudioMeterSegments" class="audio-meter-segments" aria-hidden="true"></div><span id="txAudioMeterValue" class="audio-meter-value">— dBFS</span></div>
+            <div class="audio-meter-row" role="meter" aria-label="Modulação RX" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><b>RX</b><div id="rxAudioMeterSegments" class="audio-meter-segments" aria-hidden="true"></div><span id="rxAudioMeterValue" class="audio-meter-value">— dBFS</span></div>
+            <small id="audioMeterCaller" class="audio-meter-caller"></small>
+          </div>
+          <p id="totState" class="tot-state hint tiny" hidden></p>
+          <p class="operation-hint">Toque e segure o PTT para transmitir na TG selecionada. Trocar de TG envia apenas sinalização silenciosa.</p>
+        </section>
+        <section class="card participants-card"><div class="heading"><div><p class="kicker">LAST HEARD · RODADA ATUAL</p><h2>Participantes da Rodada</h2></div><span id="participantCount" class="pill">0</span></div>
+          <div class="participant-table-wrap"><table class="participant-table"><thead><tr><th>Hora</th><th>Indic.</th><th>Nome</th><th>Localização</th></tr></thead><tbody id="participantsRows"></tbody></table></div>
+          <p id="participantsEmpty" class="hint tiny">Aguardando atividade da TalkGroup selecionada.</p>
+        </section>
+      </div>
+    </section>
+
+    <section id="screen-connection" class="app-screen" data-screen-panel="connection" aria-labelledby="connectionScreenTitle" hidden>
+      <div class="connection-layout">
+        <div class="connection-side-stack">
+          <section class="card connection-card"><div class="heading"><div><p class="kicker">ESTADO DO SISTEMA</p><h2 id="connectionScreenTitle">Ligação</h2></div><span class="signal-dot"></span></div>
+            <div class="connection-status-row"><span id="gatewayState" class="state">Desligado</span><button id="connect" class="button primary">Ligar ao master</button></div>
+            <p id="gatewayMessage" class="hint">A sessão HBP ainda não está ligada à BrandMeister.</p>
+            <div class="stats"><div><small>Servidor local</small><b id="serverState">A iniciar</b></div><div><small>UDP local</small><b id="udpState">A iniciar</b></div></div>
+            <p id="audioState" class="hint tiny">Áudio auxiliar: a iniciar.</p>
+            <p id="lastHeardState" class="hint tiny">Last Heard global: a iniciar.</p>
+            <div class="automation-options" aria-label="Opções automáticas">
+              <div class="automation-preferences">
+                <label><input id="autoConnectOnStartup" type="checkbox"><span>Ligar automaticamente ao arrancar</span></label>
+                <label><input id="autoReconnect" type="checkbox"><span>Reconectar automaticamente</span></label>
+              </div>
+              <label id="quickDisconnectLabel" class="quick-disconnect"><input id="disconnectTalkgroup" type="checkbox" disabled><span id="disconnectTalkgroupText"><b>Desconectar</b><small>TG 4000 · slot atual</small></span></label>
+            </div>
+            <p id="automationHint" class="hint tiny">As preferências são guardadas neste dispositivo.</p>
+          </section>
+          <section class="card favorites-panel"><div class="heading"><div><p class="kicker">ACESSO RÁPIDO</p><h2>Favoritos</h2></div><span class="gold">☆</span></div><div id="favorites" class="favorites"></div><p id="favoritesEmpty" class="hint tiny">Marque uma estrela numa TG para a guardar aqui.</p></section>
+        </div>
+        <section class="card catalog"><div class="heading"><div><p class="kicker">CATÁLOGO BRASILEIRO</p><h2>TalkGroups</h2></div><div class="catalog-actions"><span id="count" class="pill">0 TGs</span><button id="expandCatalog" class="expand-catalog" type="button" aria-label="Ampliar catálogo" aria-pressed="false" title="Ampliar catálogo">⛶</button><button id="addTalkgroup" class="button add-talkgroup" type="button">+ Cadastrar TG</button></div></div>
+          <div class="search-row"><input id="search" type="search" placeholder="Buscar por nome ou número"><select id="category" aria-label="Filtrar categoria"><option value="all">Todas as categorias</option></select></div>
+          <button id="toggleConnectionDetails" class="connection-details-toggle" type="button" aria-expanded="false">Ligação e favoritos ▾</button><nav id="chips" class="chips" aria-label="Categorias"></nav>
+          <div class="activity-toolbar"><nav class="activity-filters" aria-label="Estado das TalkGroups"><button type="button" data-activity-filter="all" class="active" aria-pressed="true">Todas</button><button type="button" data-activity-filter="favorites" aria-pressed="false" title="TalkGroups favoritas">★</button><button type="button" data-activity-filter="active" aria-pressed="false" title="Em comunicação ou com atividade recente"><i class="filter-led online"></i>Ativas <span id="activeTgCount">0</span></button><button type="button" data-activity-filter="offline" aria-pressed="false" title="Sem atividade observada nos últimos 60 segundos"><i class="filter-led offline"></i>Offline <span id="offlineTgCount">0</span></button></nav><button id="scanTalkgroups" class="scan-button" type="button" aria-pressed="false">▶ Scan</button></div>
+          <p id="scanStatus" class="scan-status" role="status">Verde: atividade recente · vermelho: sem tráfego observado.</p><p id="catalogActivitySource" class="catalog-source">Monitor de atividade a iniciar…</p>
+          <p class="monitor-hint">Escuta automática após vinculação da TG ao master. Selecionar e Scan sincronizam a TG com o master.</p><div id="groups" class="groups" role="list" aria-label="TalkGroups disponíveis"></div><p id="empty" class="hint" hidden>Nenhuma TG neste filtro. O estado depende da atividade recebida pelo monitor.</p>
+        </section>
+      </div>
+    </section>
+
+    <section id="settingsPanel" class="app-screen settings-screen" data-screen-panel="settings" aria-labelledby="settingsScreenTitle" hidden>
+      <div class="settings-shell">
+        <div class="settings-heading"><div><p class="kicker">CONFIGURAÇÃO DO ZAPDMR</p><h2 id="settingsScreenTitle">Definições</h2></div><span class="settings-hint">Perfis, servidor e recursos avançados</span></div>
+        <form id="settingsForm" class="settings-form">
+          <nav class="settings-tabs" aria-label="Secções das definições">
+            <button class="settings-tab active" type="button" data-settings-tab="profile" aria-current="page">Perfil</button>
+            <button class="settings-tab" type="button" data-settings-tab="server">Servidor</button>
+            <button class="settings-tab" type="button" data-settings-tab="audio">TOT e áudio</button>
+            <button class="settings-tab" type="button" data-settings-tab="data">Base e backup</button>
+          </nav>
+          <div class="settings-pane-container">
+            <section class="settings-pane settings-grid active" data-settings-pane="profile">
+              <div class="settings-card"><div class="heading"><div><p class="kicker">PERFIS</p><h3>Perfil ativo</h3></div></div>
+                <div class="profile-manager"><label>Selecionar perfil<select id="profileSelect" aria-label="Selecionar perfil"></select></label><div class="profile-actions"><button id="addProfile" class="button secondary" type="button">+ Adicionar</button><button id="deleteProfile" class="button danger" type="button">Eliminar</button></div></div>
+                <div class="settings-grid compact"><label>Nome do perfil<input id="profileName" maxlength="40" placeholder="Ex.: Cesar"></label><label>Indicativo<input id="callsign" maxlength="8" placeholder="Ex.: PY2ABC"></label>
+                  <div class="essid-row"><label>Radio ID (7 dígitos)<input id="dmrId" inputmode="numeric" maxlength="7" placeholder="1234567"></label><label>ESSID<input id="essid" inputmode="numeric" maxlength="2" placeholder="01" value="01"></label></div>
+                  <div class="frequency-row"><label>Frequência RX (Hz)<input id="rxFrequencyHz" inputmode="numeric" maxlength="9" pattern="[0-9]{9}" placeholder="433500000"></label><label>Frequência TX (Hz)<input id="txFrequencyHz" inputmode="numeric" maxlength="9" pattern="[0-9]{9}" placeholder="433500000"></label></div>
+                  <label>Timeslot padrão<select id="defaultSlot"><option value="1">TS 1</option><option value="2">TS 2</option></select></label>
+                  <label>Hotspot Security Password<input id="password" type="password" maxlength="20" placeholder="Não guardada em disco" autocomplete="new-password"></label>
+                  <p id="passwordHint" class="hint tiny span-all">A palavra-passe fica apenas na memória desta sessão.</p>
+                </div>
+              </div>
+            </section>
+            <section class="settings-pane settings-grid" data-settings-pane="server" hidden>
+              <div class="settings-card"><div class="heading"><div><p class="kicker">LIGAÇÃO HBP</p><h3>Servidor e hotspot</h3></div></div>
+                <div class="settings-grid compact">
+                  <label>Tipo de servidor<select id="serverType"><option value="brandmeister">BrandMeister (HBP)</option><option value="other">Outros (FreeDMR / XLX / ADN · HBP)</option></select></label>
+                  <label id="bmMasterPickerLabel">Master BrandMeister<select id="bmMasterSelect"><option value="">Selecione ou informe abaixo</option><option value="master.brandmeister.network">Automático · master.brandmeister.network</option><option value="7242.master.brandmeister.network">Brasil · 7242.master.brandmeister.network</option></select></label>
+                  <label class="span-all">Servidor / endereço HBP<input id="master" list="knownMasters" maxlength="180" placeholder="7242.master.brandmeister.network"><datalist id="knownMasters"><option value="master.brandmeister.network">BrandMeister automático</option><option value="7242.master.brandmeister.network">BrandMeister Brasil 7242</option></datalist></label>
+                  <label>Porta UDP<input id="masterPort" type="number" min="1" max="65535" step="1" value="62031"></label>
+                  <div id="otherServerFields" class="server-extra-fields span-all"><label>TalkGroups estáticas (separadas por vírgula)<input id="staticTalkgroups" maxlength="500" placeholder="724, 91"></label><p class="hint tiny">Lista guardada neste perfil para referência; a inscrição estática depende do servidor.</p>
+                    <label>Localização<input id="locationName" maxlength="120" placeholder="Cidade, estado, país"></label>
+                    <div class="frequency-row"><label>Latitude<input id="latitude" inputmode="decimal" placeholder="-23.550520"></label><label>Longitude<input id="longitude" inputmode="decimal" placeholder="-46.633308"></label></div>
+                  </div>
+                  <div id="mobileFirmwareSettings" class="mobile-relay-settings span-all" hidden>
+                    <p class="kicker">RÁDIO ANDROID AUTÓNOMO</p>
+                    <p class="hint tiny">Os dois firmwares estão incluídos no APK e são instalados automaticamente na pasta privada ao abrir o aplicativo, com validação SHA-256. Não é necessário baixar nem procurar ficheiros.</p>
+                    <button id="activateVocoder" class="button primary" type="button">Ativar / Reparar vocoder · sem internet</button><div class="firmware-import-actions"><button id="importDmrFirmware" class="button secondary" type="button">Reativar D002.032.bin</button><button id="importCoreFirmware" class="button secondary" type="button">Reativar d02032-core.img</button></div><details class="settings-details"><summary>Download HTTPS alternativo (opcional)</summary><p class="hint tiny">A instalação local não precisa destes links. Use somente para substituir os ficheiros por cópias com os mesmos hashes.</p><label>Link direto HTTPS · D002.032.bin<input id="dmrFirmwareUrl" type="url" inputmode="url" placeholder="https://…/D002.032.bin" autocomplete="off"></label><label>Link direto HTTPS · d02032-core.img<input id="coreFirmwareUrl" type="url" inputmode="url" placeholder="https://…/d02032-core.img" autocomplete="off"></label><div class="firmware-import-actions"><button id="downloadDmrFirmware" class="button secondary" type="button">Baixar D002.032.bin</button><button id="downloadCoreFirmware" class="button secondary" type="button">Baixar d02032-core.img</button></div></details>
+                    <p id="mobileFirmwareHint" class="hint tiny">Firmware ainda não verificado.</p>
+                  </div>
+                  <p class="hint tiny span-all">Exemplo: 433500000 = 433,500 MHz. Informe as frequências reais configuradas no hotspot.</p>
+                </div>
+              </div>
+            </section>
+            <section class="settings-pane settings-grid" data-settings-pane="audio" hidden>
+              <div class="settings-card"><div class="heading"><div><p class="kicker">PROTEÇÃO DE TRANSMISSÃO</p><h3>Temporizador (TOT)</h3></div></div>
+                <div class="settings-grid compact"><label>Tempo máximo de fala (segundos)<input id="totLimitSeconds" type="number" min="30" max="900" step="5" value="180"></label>
+                  <label>Avisar antes do limite (segundos)<input id="totWarningSeconds" type="number" min="0" max="120" step="1" value="15"></label>
+                  <div class="settings-checks span-all"><label><input id="totVisualAlert" type="checkbox" checked> Alerta visual</label><label><input id="totSoundAlert" type="checkbox" checked> Alerta sonoro</label></div>
+                  <p class="hint tiny span-all">O PTT será liberado automaticamente ao atingir o limite.</p>
+                </div>
+              </div>
+              <div class="settings-card"><div class="heading"><div><p class="kicker">MICROFONE E RECEPÇÃO</p><h3>Áudio e vocoder</h3></div></div>
+                <div class="settings-grid compact"><label>Ganho do microfone TX <span id="txGainValue">100%</span><input id="txGainPercent" type="range" min="0" max="200" step="5" value="100"></label>
+                  <label>Volume de recepção RX <span id="rxVolumeValue">100%</span><input id="rxVolumePercent" type="range" min="0" max="200" step="5" value="100"></label>
+                  <button id="audioTest" class="button secondary span-all" type="button">Testar áudio e vocoder</button>
+                  <p id="audioTestResult" class="hint tiny span-all">O teste reproduz um tom curto no dispositivo de saída selecionado.</p>
+                </div>
+              </div>
+            </section>
+            <section class="settings-pane settings-grid" data-settings-pane="data" hidden>
+              <div class="settings-card"><div class="heading"><div><p class="kicker">BASE LOCAL</p><h3>Base de Dados DMR ID</h3></div></div>
+                <p id="dmrDatabaseInfo" class="hint tiny">Nenhuma base local carregada.</p>
+                <div class="advanced-actions"><button id="updateDmrDatabase" class="button secondary" type="button">Atualizar por CSV</button><button id="deleteDmrDatabase" class="button danger" type="button">Eliminar base</button></div>
+                <input id="dmrDatabaseFile" type="file" accept=".csv,text/csv" hidden>
+                <p class="hint tiny">Importe um CSV RadioID guardado no computador para consulta offline.</p>
+              </div>
+              <div class="settings-card"><div class="heading"><div><p class="kicker">SEGURANÇA</p><h3>Cópia e Restauro</h3></div></div>
+                <p class="hint tiny">O backup inclui perfis, TGs próprias, base DMR ID e definições. A senha protegida pelo Windows DPAPI só pode ser restaurada no Windows que a protegeu.</p>
+                <div class="advanced-actions"><button id="exportBackup" class="button secondary" type="button">Exportar backup</button><button id="importBackupButton" class="button secondary" type="button">Restaurar backup</button></div>
+                <input id="backupFile" type="file" accept="application/json,.json" hidden>
+              </div>
+              <details class="settings-card about-card"><summary><span><small class="kicker">INFORMAÇÕES</small><b>Sobre o ZapDMR</b></span></summary>
+                <p class="hint">ZapDMR · cliente HBP BrandMeister com áudio AMBE, DMRD e vocoder local.</p><p id="aboutArchitecture" class="hint tiny">O áudio usa o servidor Node.js, o auxiliar ZapDMRAudio e um named pipe local. O tráfego de rádio é enviado pela ligação UDP ao master configurado.</p><p class="hint tiny"><a href="licenses/GPL-3.0.txt" target="_blank" rel="noopener">Licença GPL-3.0</a> · <a href="licenses/THIRD_PARTY_NOTICES.txt" target="_blank" rel="noopener">Componentes e código-fonte</a></p>
+              </details>
+            </section>
+          </div>
+          <button class="button primary settings-save" type="submit">Guardar configuração</button>
+        </form>
+      </div>
+    </section>
+  </main>
+  <nav class="bottom-nav" aria-label="Navegação principal">
+    <button class="bottom-nav-button active" type="button" data-screen="ptt" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="13" rx="3"></rect><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-4 0h8"></path></svg><span>PTT</span></button>
+    <button class="bottom-nav-button" type="button" data-screen="connection"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22V4m-5 18 5-9 5 9M8 8a5.7 5.7 0 0 1 0 8m8-8a5.7 5.7 0 0 0 0 8M4.5 4.5a10.6 10.6 0 0 1 0 15m15-15a10.6 10.6 0 0 0 0 15"></path></svg><span>Ligação</span></button>
+    <button class="bottom-nav-button" type="button" data-screen="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"></path><path d="m19.4 15 .1.1a1.7 1.7 0 0 1-2.4 2.4l-.1-.1a1.7 1.7 0 0 0-2.9 1.2v.2a1.7 1.7 0 0 1-3.4 0v-.2a1.7 1.7 0 0 0-2.9-1.2l-.1.1a1.7 1.7 0 0 1-2.4-2.4l.1-.1a1.7 1.7 0 0 0-1.2-2.9H4a1.7 1.7 0 0 1 0-3.4h.2a1.7 1.7 0 0 0 1.2-2.9l-.1-.1a1.7 1.7 0 0 1 2.4-2.4l.1.1a1.7 1.7 0 0 0 2.9-1.2V2a1.7 1.7 0 0 1 3.4 0v.2a1.7 1.7 0 0 0 2.9 1.2l.1-.1a1.7 1.7 0 0 1 2.4 2.4l-.1.1a1.7 1.7 0 0 0 1.2 2.9h.2a1.7 1.7 0 0 1 0 3.4h-.2a1.7 1.7 0 0 0-1.2 2.9Z"></path></svg><span>Definições</span></button>
+  </nav>
+  <dialog id="talkgroupDialog" class="talkgroup-dialog">
+    <form id="talkgroupForm">
+      <div><p class="kicker">CATÁLOGO BRASILEIRO</p><h2>Cadastrar TalkGroup</h2></div>
+      <label>Número da TG<input id="newTalkgroupId" inputmode="numeric" pattern="[0-9]+" maxlength="8" required placeholder="Ex.: 9990"></label>
+      <label>Nome<input id="newTalkgroupName" maxlength="60" required placeholder="Ex.: QAP Local"></label>
+      <label>Slot<select id="newTalkgroupSlot" required><option value="1">TS 1</option><option value="2">TS 2</option></select></label>
+      <label>Categoria<select id="newTalkgroupCategory" required><option>Nacionais e mundiais</option><option>Regiões</option><option>Estados</option><option>Redes externas</option><option>Especiais</option></select></label>
+      <p class="hint tiny">A TG será guardada neste dispositivo junto às TalkGroups originais.</p>
+      <div class="dialog-actions"><button id="cancelTalkgroup" class="button secondary" type="button">Cancelar</button><button id="saveTalkgroup" class="button primary" type="submit">Cadastrar</button></div>
+    </form>
+  </dialog>
+  <dialog id="profileDialog" class="talkgroup-dialog profile-dialog"><form id="profileForm"><div><p class="kicker">PERFIS DO ZAPDMR</p><h2>Adicionar perfil</h2></div><label>Nome do perfil<input id="newProfileName" maxlength="40" required placeholder="Ex.: XLX026"></label><p class="hint tiny">O novo perfil começa com os dados atuais; depois pode editar ID, servidor e restantes campos sem alterar os outros perfis.</p><div class="dialog-actions"><button id="cancelProfile" class="button secondary" type="button">Cancelar</button><button id="saveProfile" class="button primary" type="submit">Criar perfil</button></div></form></dialog>
+  <div id="toast" role="status" class="toast"></div><script src="/mobile-audio.js" defer></script><script src="/catalog-store.js" defer></script><script src="/talkgroup-activity.js" defer></script><script src="/app.js" defer></script><script src="/operation-controls.js" defer></script><script src="/radio-console.js" defer></script><script src="/radio-bridge.js" defer></script><script src="/community.js" defer></script>
+</body>
+</html>

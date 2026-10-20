@@ -1,0 +1,12 @@
+const fs = require('node:fs');
+const assert = require('node:assert/strict');
+const html = fs.readFileSync('web/index.html', 'utf8');
+const js = fs.readFileSync('web/app.js', 'utf8');
+const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
+const duplicates = ids.filter((id, index) => ids.indexOf(id) !== index);
+const references = [...js.matchAll(/\$\('#([A-Za-z][\w-]*)'\)/g)].map((match) => match[1]);
+const missing = [...new Set(references.filter((id) => !ids.includes(id)))];
+assert.deepEqual(duplicates, [], 'Duplicate HTML IDs');
+assert.deepEqual(missing, [], 'Missing JavaScript selector targets');
+assert(html.includes('/talkgroup-activity.js'));
+console.log(`PASS: ${ids.length} unique HTML IDs and all literal JavaScript ID selectors resolve`);
