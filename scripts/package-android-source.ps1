@@ -34,8 +34,9 @@ try {
         Add-SourceFile (Join-Path $projectRoot $name) $name
     }
     foreach ($name in @('web','src','electron','scripts','docs','android')) { Add-SourceTree (Join-Path $projectRoot $name) $name }
+    Add-SourceFile (Join-Path $projectRoot 'data\talkgroups-brasil.json') 'data/talkgroups-brasil.json'
     Add-SourceTree (Join-Path $projectRoot 'site\public') 'site/public'
-    foreach ($name in @('server.mjs','public-pages.mjs','package.json','README.md','AUTENTICACAO.md','WHATSAPP-OTP.md','ZAPCHAT-ANEXOS.md','AVISOS-VERSOES.md','VERIFICACAO-1.4.0.md','VERIFICACAO-2026-10-19.md','.env.example','Caddyfile','zapdmr.service','LICENSE')) { if (Test-Path -LiteralPath (Join-Path $projectRoot ('site/'+$name))) { Add-SourceFile (Join-Path $projectRoot ('site/'+$name)) ('site/'+$name) } }
+    foreach ($name in @('server.mjs','public-pages.mjs','package.json','README.md','AUTENTICACAO.md','WHATSAPP-OTP.md','ZAPCHAT-ANEXOS.md','AVISOS-VERSOES.md','VERIFICACAO-1.4.0.md','VERIFICACAO-1.4.1.md','VERIFICACAO-2026-10-19.md','.env.example','Caddyfile','zapdmr.service','LICENSE')) { if (Test-Path -LiteralPath (Join-Path $projectRoot ('site/'+$name))) { Add-SourceFile (Join-Path $projectRoot ('site/'+$name)) ('site/'+$name) } }
     foreach ($name in @('api.mjs','attachments.mjs','release-notifications.mjs','worker.mjs','schema.sql','package.json','package-lock.json','wrangler.jsonc','configure-secrets.mjs','configure-whatsapp-bridge.mjs','README.md','.gitignore')) { if (Test-Path -LiteralPath (Join-Path $projectRoot ('site/cloudflare/'+$name))) { Add-SourceFile (Join-Path $projectRoot ('site/cloudflare/'+$name)) ('site/cloudflare/'+$name) } }
     Add-SourceTree (Join-Path $projectRoot 'site\cloudflare\migrations') 'site/cloudflare/migrations'
     if (Test-Path -LiteralPath (Join-Path $projectRoot 'site\VERIFICACAO-2026-10-20.md')) { Add-SourceFile (Join-Path $projectRoot 'site\VERIFICACAO-2026-10-20.md') 'site/VERIFICACAO-2026-10-20.md' }

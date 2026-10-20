@@ -104,6 +104,14 @@ body{min-height:0;display:grid;grid-template-rows:var(--topbar-height) minmax(0,
 .operation-card .selected>strong{min-width:70px}
 .quick-talkgroup{display:grid;gap:5px;color:var(--muted);font-size:10px;font-weight:700}
 .quick-talkgroup select,.settings-card select{width:100%;min-width:0;height:38px;padding:0 10px;border:1px solid var(--border);border-radius:9px;background:var(--subtle);color:var(--ink);font-size:11px}
+.quick-talkgroup-catalog{display:grid;gap:6px;min-width:0}
+.quick-catalog-filters{display:flex;flex-wrap:wrap;gap:5px}
+.quick-catalog-filters button{flex:1 1 auto;min-height:29px;padding:4px 9px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--muted);font:inherit;font-size:10px;cursor:pointer}
+.quick-catalog-filters button.active{border-color:var(--green);background:var(--green-soft);color:var(--green-text);font-weight:700}
+.quick-catalog-filters button:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+.quick-catalog-hint{font-size:9px;color:var(--muted);line-height:1.4;overflow-wrap:anywhere}
+.quick-talkgroup select optgroup{font-weight:700}.quick-talkgroup select option{font-weight:400}
+@media(max-width:760px){.quick-talkgroup-catalog{gap:4px}.quick-catalog-filters button{min-height:27px;font-size:9px;padding:4px 7px}.quick-catalog-hint{font-size:8px}}
 .ptt-large{width:100%;min-height:64px;flex:0 0 auto;border-radius:13px;font-size:18px;letter-spacing:.2px}
 .operation-hint{margin:auto 0 0;color:var(--muted);font-size:10px;line-height:1.45}
 .audio-meter{padding:0;background:transparent}

@@ -1,7 +1,7 @@
 import {handleApi, handleDownload, cleanup, discoverReleaseNotifications} from './api.mjs';
 import {publicPagePaths, renderPublicPage, sitemap} from '../public-pages.mjs';
 
-const assetsVersion = '20261020-chat-2';
+const assetsVersion = '20261020-catalog-1';
 const aliases = {
   '/downloads': '/#downloads', '/downloads/': '/#downloads',
   '/recursos': '/#recursos', '/recursos/': '/#recursos',
@@ -60,7 +60,7 @@ async function route(request, env) {
   if (pathname === '/healthz') {
     if (!env.DB) return json(503, {ok: false, message: 'Banco ainda não configurado.'});
     await env.DB.prepare('SELECT 1').first();
-    return json(200, {ok: true, version: '1.4.0'});
+    return json(200, {ok: true, version: '1.4.1'});
   }
   if (aliases[pathname]) return new Response(null, {status: 308, headers: {Location: aliases[pathname]}});
   const production = Boolean(env.OWNER_NAME && env.PRIVACY_EMAIL);

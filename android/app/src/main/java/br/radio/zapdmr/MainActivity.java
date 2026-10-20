@@ -30,6 +30,6 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(savedInstanceState);
         android.webkit.WebView webView=getBridge().getWebView();
         String agent=webView.getSettings().getUserAgentString();
-        if(!agent.contains("ZapDMR/"))webView.getSettings().setUserAgentString(agent+" ZapDMR/1.4.0");
+        if(!agent.contains("ZapDMR/"))webView.getSettings().setUserAgentString(agent+" ZapDMR/1.4.1");
     }
 }

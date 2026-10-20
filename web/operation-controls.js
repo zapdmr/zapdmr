@@ -195,7 +195,7 @@
     const value=prefs();for(const id of optionKeys){const input=$('#'+id);if(!input)continue;if(input.type==='checkbox')input.checked=Boolean(value[id]);else input.value=String(value[id]);}
     for(const [key,on]of Object.entries(value.columns)){const input=$('#column-'+key);if(input)input.checked=Boolean(on);}
     $('#voxState').textContent=value.voxEnabled?(native()?(gatewayStatus.connected?'VOX configurado no serviço Android.':'VOX configurado · aguarda ligação ao master.'):'VOX configurado · requer janela ativa.'):'VOX desligado.';
-    const hint=document.querySelector('.operation-hint');if(hint)hint.textContent=value.pttMode==='toggle'?'Toque para iniciar e toque novamente para parar. Trocar de TG não transmite; a escuta depende do master.':'Mantenha premido para transmitir. Soltar libera o PTT.';
+    const hint=document.querySelector('.operation-hint');if(hint)hint.textContent=value.pttMode==='toggle'?'Toque para iniciar e toque novamente para parar. Trocar de TG não transmite voz. ODTP solicita inscrição no master.':'Mantenha premido para transmitir. Soltar libera o PTT.';
     $('#operationTheme').value=settings.theme;$('#audioMeters').hidden=!value.showMeters;
     $('#batterySettings').disabled=!native();$('#allowLocked').disabled=!native();
     document.body.classList.toggle('hide-window-title',value.hideStatusBar&&!native());reflectTx();renderPreview();renderParticipantsView();
@@ -224,7 +224,7 @@
   $('#batterySettings').onclick=()=>void mobileAudio.batterySettings().catch(error=>toast(error.message));
   window.ZapDMROperation={apply,renderParticipants:renderParticipantsView,requestPtt};
   setInterval(()=>{
-    reflectTx();$('#pttScan').setAttribute('aria-pressed',String(scanEnabled));$('#pttScanLabel').textContent=(gatewayStatus.talkgroupBurstActive||talkgroupBurstStatus.pending)?`A trocar para TG ${groupSelected()?.id||'—'}…`:privateContact?`Individual: ${privateContact.callsign||privateContact.id} · PTT para responder`:scanEnabled?$('#scanStatus').textContent:gatewayStatus.connected?`A escutar TG ${groupSelected()?.id||'—'} · iniciar Scan`:'A procurar… · ligue ao master para escutar';
+    reflectTx();const reception=window.ZapDMRReception?.render();$('#pttScan').setAttribute('aria-pressed',String(scanEnabled));$('#pttScanLabel').textContent=(gatewayStatus.talkgroupBurstActive||talkgroupBurstStatus.pending)?`A trocar para TG ${groupSelected()?.id||'—'}…`:privateContact?`Individual: ${privateContact.callsign||privateContact.id} · PTT para responder`:scanEnabled?$('#scanStatus').textContent:gatewayStatus.connected?(reception?.text||`TG ${groupSelected()?.id||'—'} — aguardando estado RX`):'A procurar… · ligue ao master para escutar';
     if(!native()&&prefs().beepIncoming&&audioLevels.RX>0&&!wasReceiving&&Date.now()-lastRxBeep>3000){lastRxBeep=Date.now();beep();}wasReceiving=audioLevels.RX>0;
 
   },250);

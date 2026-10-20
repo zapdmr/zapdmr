@@ -21,6 +21,7 @@ let talkgroupBurstStatus = { pending: false, purpose: null, talkgroupId: null };
 const audioMeterResetTimers = { TX: undefined, RX: undefined };
 const audioLevels = { TX: 0, RX: 0 };
 let categoryValue = 'all';
+let quickCatalogScope = 'all';
 let activityFilter = 'all';
 let catalogActivitySignature = '';
 let scanEnabled = false;
@@ -111,7 +112,7 @@ function renderProfiles() {
 }
 
 function applySettingsToForm(value) {
-  settings = { ...defaults, ...value };
+  settings = window.ZapDMRProtocol.normalize({ ...defaults, ...value });
   settings.favorites = Array.isArray(settings.favorites) ? [...new Set(settings.favorites.map(Number).filter(Number.isInteger))] : [724];
   activeProfileId = value.profileId || activeProfileId;
   if (!mobileAudio?.isAndroid?.()) {
@@ -134,6 +135,7 @@ function applySettingsToForm(value) {
   $('#master').value = settings.masterHost;
   $('#bmMasterSelect').value = ['master.brandmeister.network', '7242.master.brandmeister.network'].includes(settings.masterHost) ? settings.masterHost : '';
   $('#masterPort').value = settings.masterPort || 62031;
+  $('#radioProtocol').value=settings.radioProtocol;updateRadioProtocolForm();
   $('#staticTalkgroups').value = settings.staticTalkgroups || '';
   $('#locationName').value = settings.locationName || '';
   $('#latitude').value = settings.latitude || '';
@@ -171,7 +173,60 @@ function setTheme(value) {
 }
 
 function categoryName(value) {
-  return value === 'Nacionais e mundiais' ? 'Nacional' : value;
+  return value === 'Mundiais' || value === 'Mundiais/Países' ? 'Mundiais' : 'Nacionais';
+}
+
+// Preserve older custom TGs while presenting only the two current categories.
+function catalogCategory(group) {
+  if (group.category === 'Mundiais' || group.category === 'Mundiais/Países') return 'Mundiais';
+  if (['Nacionais', 'Regiões', 'Estados'].includes(group.category)) return 'Nacionais';
+  const bundled = window.ZapDMRCatalog.bundled.find(item => Number(item.id) === Number(group.id));
+  if (bundled?.category === 'Mundiais' || bundled?.category === 'Mundiais/Países') return 'Mundiais';
+  if (['Nacionais', 'Regiões', 'Estados'].includes(bundled?.category)) return 'Nacionais';
+  return /^724/.test(String(group.id)) || [1, 2, 8, 9, 915, 4000].includes(Number(group.id)) ? 'Nacionais' : 'Mundiais';
+}
+
+function catalogCategories() {
+  return ['Nacionais', 'Mundiais'];
+}
+
+function isNationalGroup(group) {
+  return catalogCategory(group) === 'Nacionais';
+}
+
+function matchesCatalogCategory(group, category) {
+  return category === 'all' || (category === 'Nacionais' ? isNationalGroup(group) : catalogCategory(group) === category);
+}
+
+function renderQuickTalkgroups() {
+  const select = $('#quickTalkgroupSelect');
+  const visible = groups.filter(group => quickCatalogScope === 'national' ? isNationalGroup(group)
+    : quickCatalogScope === 'world' ? catalogCategory(group) === 'Mundiais' : true);
+  const current = groups.find(group => group.id === Number(settings.selectedTalkgroupId));
+  const outside = current && !visible.includes(current);
+  const sections = [];
+  const section = (label, values) => {
+    if (!values.length) return;
+    const optgroup = document.createElement('optgroup');
+    optgroup.label = label;
+    for (const group of values) {
+      const option = new Option(`TG ${group.id} · ${group.name}`, String(group.id));
+      if (outside && group.id === current.id) option.dataset.outsideFilter = 'true';
+      optgroup.append(option);
+    }
+    sections.push(optgroup);
+  };
+  const displayed = outside ? [current, ...visible] : visible;
+  for (const category of catalogCategories()) section(category, displayed.filter(group => catalogCategory(group) === category));
+  select.replaceChildren(...sections);
+  select.value = String(settings.selectedTalkgroupId);
+  document.querySelectorAll('[data-quick-catalog-filter]').forEach(button => {
+    const active = button.dataset.quickCatalogFilter === quickCatalogScope;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+  const hint = $('#quickCatalogHint');
+  if (hint) hint.textContent = `${visible.length} TGs nesta lista · 🟢 atividade recente · 🔴 sem atividade recente. Filtrar não muda a TG atual.${outside ? ` TG ${current.id} mantida, fora do filtro.` : ''}`;
 }
 
 function hasRecentActivity(id) {
@@ -196,8 +251,8 @@ function setLedState(led, active) {
 function updateQuickTalkgroupIndicators(){
   for(const option of $('#quickTalkgroupSelect').options){
     const group=groups.find(item=>item.id===Number(option.value));if(!group)continue;
-    const active=hasRecentActivity(group.id);option.textContent=`${active?'🟢':'🔴'} TG ${group.id} · ${group.name}`;
-    option.setAttribute('aria-label',`TG ${group.id}, ${group.name}, ${active?'atividade nos últimos 60 segundos':'sem atividade recente'}`);
+    const active=hasRecentActivity(group.id),outside=option.dataset.outsideFilter==='true';option.textContent=`${active?'🟢':'🔴'} TG ${group.id} · ${group.name}${outside?' · atual fora do filtro':''}`;
+    option.setAttribute('aria-label',`TG ${group.id}, ${group.name}, ${active?'atividade nos últimos 60 segundos':'sem atividade recente'}${outside?', atual fora do filtro':''}`);
   }
 }
 function updateActivityDots() {
@@ -242,7 +297,7 @@ function updateDisconnectControl() {
   checkbox.checked = disconnectInProgress;
   $('#disconnectTalkgroupText').innerHTML = disconnectInProgress
     ? '<b>A desconectar TG 4000…</b><small>Enviando áudio silencioso</small>'
-    : '<b>Disconectar</b><small>TG 4000 · slot atual</small>';
+    : (gatewayStatus.protocol==='odtp'||settings.radioProtocol==='odtp'?'<b>Cancelar inscrição</b><small>ODTP · sem TG 4000</small>':'<b>Desconectar</b><small>TG 4000 · slot atual</small>');
   $('#quickDisconnectLabel').classList.toggle('busy', disconnectInProgress);
 }
 
@@ -256,7 +311,7 @@ function renderSelected() {
   const selectedCaller = $('#selectedCaller');
   selectedCaller.textContent = callerLabel(group.id);
   selectedCaller.hidden = !selectedCaller.textContent;
-  $('#selectedCategory').textContent = categoryName(group.category);
+  $('#selectedCategory').textContent = categoryName(catalogCategory(group));
   $('#favoriteSelected').textContent = settings.favorites.includes(group.id) ? '★' : '☆';
   $('#quickTalkgroupSelect').value = String(group.id);
   $('#selectedActivityLed').dataset.talkgroupId = String(group.id);
@@ -353,7 +408,7 @@ function renderGroups() {
     led.dataset.talkgroupId = String(group.id);
     setLedState(led, hasRecentActivity(group.id));
     const name = document.createElement('b'); name.textContent = group.name;
-    const meta = document.createElement('small'); meta.textContent = [`TG ${group.id}`, group.slot ? `TS ${group.slot}` : null, group.region || categoryName(group.category)].filter(Boolean).join(' · ');
+    const meta = document.createElement('small'); meta.textContent = [`TG ${group.id}`, group.slot ? `TS ${group.slot}` : null, group.region || categoryName(catalogCategory(group))].filter(Boolean).join(' · ');
     const caller = document.createElement('small'); caller.className = 'activity-caller'; caller.dataset.talkgroupId = String(group.id);
     caller.textContent = callerLabel(group.id); caller.hidden = !caller.textContent;
     info.append(name, meta, caller);
@@ -378,14 +433,7 @@ function renderGroups() {
   }
   $('#count').textContent = `${visible.length}/${groups.length} TGs`;
   $('#empty').hidden = visible.length > 0;
-  const quickSelect = $('#quickTalkgroupSelect');
-  quickSelect.replaceChildren(...groups.map((group) => {
-    const option = document.createElement('option');
-    option.value = String(group.id);
-    option.textContent = `TG ${group.id} · ${group.name}`;
-    return option;
-  }));
-  quickSelect.value = String(settings.selectedTalkgroupId);
+  renderQuickTalkgroups();
   renderSelected();
   renderFavorites();
   updateActivityDots();
@@ -393,8 +441,9 @@ function renderGroups() {
 }
 
 function filteredCatalogGroups(status = activityFilter) {
-  const source = status === 'favorites' ? groups.filter((group) => settings.favorites.map(Number).includes(group.id)) : groups;
-  return catalogActivity.filter(source, { category: categoryValue, query: $('#search').value,
+  const source = groups.filter(group => matchesCatalogCategory(group, categoryValue)
+    && (status !== 'favorites' || settings.favorites.map(Number).includes(group.id)));
+  return catalogActivity.filter(source, { category: 'all', query: $('#search').value,
     status: status === 'favorites' ? 'all' : status, activity: talkgroupActivity });
 }
 
@@ -446,9 +495,11 @@ function refreshCatalogActivity() {
 }
 
 function renderCategories() {
-  const values = [...new Set(groups.map((group) => group.category))];
+  const values = catalogCategories();
+  if (categoryValue !== 'all' && !values.includes(categoryValue)) categoryValue = 'all';
   const select = $('#category');
   select.replaceChildren(new Option('Todas as categorias', 'all'), ...values.map((value) => new Option(value, value)));
+  select.value = categoryValue;
   const chips = $('#chips');
   chips.replaceChildren();
   for (const [value, label] of [['all', 'Todas'], ...values.map((value) => [value, value])]) {
@@ -456,6 +507,8 @@ function renderCategories() {
     button.type = 'button';
     button.className = `chip${categoryValue === value ? ' active' : ''}`;
     button.textContent = label;
+    button.setAttribute('aria-pressed', String(categoryValue === value));
+    if (value === 'Nacionais') button.title = 'Brasil: nacionais, regiões e estados';
     button.onclick = () => { categoryValue = value; select.value = value; renderCategories(); renderGroups(); };
     chips.append(button);
   }
@@ -494,6 +547,7 @@ function readSettingsFromForm() {
   settings.serverType = $('#serverType').value === 'other' ? 'other' : 'brandmeister';
   settings.masterHost = $('#master').value.trim();
   settings.masterPort = Number($('#masterPort').value);
+  settings.radioProtocol=$('#radioProtocol').value==='odtp'?'odtp':'hbp';
   settings.staticTalkgroups = $('#staticTalkgroups').value.trim();
   settings.locationName = $('#locationName').value.trim();
   settings.latitude = $('#latitude').value.trim();
@@ -538,8 +592,8 @@ async function selectGroup(id, options = {}) {
     renderAudioMeter({direction:'RX',level:0});
     if(!options.fromScan)toast(`A trocar para TG ${id}…`);
     await tuneSelectedTalkgroup(id);if(revision!==selectionRevision)return;
-    renderGroups();if(!options.keepScreen)setActiveScreen('ptt');
-    if(!options.fromScan&&!mobileAudio?.isAndroid?.())toast(`TG ${id} selecionada sem transmitir. A receção depende do encaminhamento do master.`);
+    renderGroups();renderReceptionState();if(!options.keepScreen)setActiveScreen('ptt');
+    if(!options.fromScan&&!mobileAudio?.isAndroid?.())toast(settings.radioProtocol==='odtp'?`TG ${id} — inscrição ODTP solicitada, aguardando resposta.`:`TG ${id} — filtro HBP selecionado; servidor não oferece inscrição sem PTT.`);
   }catch(error){toast(error.message);if(options.fromScan)stopTalkgroupScan();}
 }
 
@@ -604,7 +658,8 @@ function showStatus(data) {
   $('#gatewayState').classList.toggle('online', connected);
   $('#gatewayState').classList.toggle('error', gateway.state === 'error' && !reconnecting);
   $('#gatewayState').classList.toggle('reconnecting', reconnecting);
-  $('#gatewayMessage').textContent = automation.message || gateway.message || 'A sessão HBP não está ligada.';
+  $('#gatewayMessage').textContent = automation.message || gateway.message || 'A sessão de rádio não está ligada.';
+  renderReceptionState();
   $('#badge').innerHTML = `<i></i> ${reconnecting ? 'A reconectar…' : connected ? (armed ? 'PTT preparado' : 'Ligado') : 'Painel pronto'}`;
   $('#badge').classList.toggle('online', connected);
   $('#badge').classList.toggle('reconnecting', reconnecting);
@@ -687,12 +742,13 @@ function displayMobileStatus(data = {}) {
     pttReady: Boolean(data.pttReady), state: data.state || (connected ? 'connected' : 'disconnected'), message: data.message || '' };
   automationStatus = { reconnecting, message: data.message || '' };
   $('#serverState').textContent = 'Rádio nativo';
-  $('#udpState').textContent = connected ? `UDP · ${settings.masterHost}:${settings.masterPort}` : 'Sessão HBP local';
+  $('#udpState').textContent = connected ? `UDP · ${settings.masterHost}:${settings.masterPort}` : 'Sessão '+(settings.radioProtocol||'hbp').toUpperCase()+' local';
   $('#gatewayState').textContent = reconnecting ? 'A reconectar…' : connected ? (mobilePttActive ? 'Transmitindo' : 'Ligado') : data.state === 'error' ? 'Falha na ligação' : 'Desligado';
   $('#gatewayState').classList.toggle('online', connected);
   $('#gatewayState').classList.toggle('error', data.state === 'error' && !reconnecting);
   $('#gatewayState').classList.toggle('reconnecting', reconnecting);
-  $('#gatewayMessage').textContent = data.message || 'A sessão HBP não está ligada.';
+  $('#gatewayMessage').textContent = data.message || 'A sessão de rádio não está ligada.';
+  renderReceptionState();
   $('#badge').innerHTML = `<i></i> ${reconnecting ? 'A reconectar…' : connected ? 'Ligado' : 'Rádio pronto'}`;
   $('#badge').classList.toggle('online', connected);
   $('#badge').classList.toggle('reconnecting', reconnecting);
@@ -706,7 +762,7 @@ function displayMobileStatus(data = {}) {
 function handleMobileRadioEvent(packet) {
   window.dispatchEvent(new CustomEvent('zapdmr:radio-event',{detail:packet}));
   const data = packet?.data || {};
-  if(packet?.event==='link')toast(data.message||'TalkGroup selecionada em modo passivo.');
+  if(packet?.event==='link')toast(data.message||'Destino selecionado.');
   if(packet?.event==='audioFocus'){document.getElementById('audioState').textContent=data.message;}
   if (packet?.event === 'firmwareDownload') $('#mobileFirmwareHint').textContent = `A baixar ${data.file}: ${data.percent}%`;
   if (packet?.event === 'tot') updateTotStatus(data);
@@ -786,7 +842,7 @@ async function init() {
   const androidAudioAvailable = Boolean(mobileAudio?.isAndroid?.());
   $('#mobileFirmwareSettings').hidden = !androidAudioAvailable;
   if (androidAudioAvailable) {
-    $('#aboutArchitecture').textContent = 'Android 1.4.0 · serviço HBP/UDP e áudio locais, com vocoder ARM64/ARMv7. Firmware incluído, instalado automaticamente ao abrir o aplicativo.';
+    $('#aboutArchitecture').textContent = 'Android 1.4.1 · serviço HBP/UDP e áudio locais, com vocoder ARM64/ARMv7. Firmware incluído, instalado automaticamente ao abrir o aplicativo.';
     try {
       await Promise.race([mobileAudio.initialize(handleMobileRadioEvent), new Promise((_, reject) => setTimeout(() => reject(new Error('O rádio ainda está a iniciar; o catálogo está disponível.')), 8000))]);
       mobileSecureConfig = await Promise.race([mobileAudio.loadRadioConfig(), new Promise((resolve) => setTimeout(() => resolve({}), 5000))]);
@@ -940,6 +996,13 @@ $('#quickTalkgroupSelect').onchange = (event) => {
   const id = Number(event.target.value);
   if (Number.isInteger(id) && id > 0) void selectGroup(id);
 };
+document.querySelectorAll('[data-quick-catalog-filter]').forEach(button => {
+  button.onclick = () => {
+    quickCatalogScope = button.dataset.quickCatalogFilter;
+    renderQuickTalkgroups();
+    updateQuickTalkgroupIndicators();
+  };
+});
 $('#serverType').onchange = (event) => {
   const other = event.target.value === 'other';
   $('#otherServerFields').hidden = !other;
@@ -1135,7 +1198,7 @@ $('#disconnectTalkgroup').onchange = async (event) => {
   disconnectInProgress = true;
   updateDisconnectControl();
   try {
-    if(mobileAudio?.isAndroid?.()){await mobileAudio.unlinkTalkgroup();toast('Comando TG 4000 solicitado.');return;}
+    if(mobileAudio?.isAndroid?.()){await mobileAudio.unlinkTalkgroup();toast(settings.radioProtocol==='odtp'?'Cancelamento de inscrição ODTP solicitado.':'Comando TG 4000 solicitado.');return;}
     const result = await callApi('/api/disconnect-talkgroup', { method: 'POST', body: '{}' });
     if (result.data?.message) toast(result.data.message);
     else if (!result.ok) toast('Não foi possível enviar o comando TG 4000.');
@@ -1209,3 +1272,16 @@ $('#connect').onclick = async () => {
 
 
 init().catch((error) => { console.error(error); renderCategories(); renderGroups(); toast('Catálogo local disponível. ' + (error.message || 'Falha ao iniciar o rádio.')); });
+
+function updateRadioProtocolForm(){
+  const odtp=$('#radioProtocol').value==='odtp';$('#essid').disabled=odtp;
+  $('#radioProtocolHint').textContent=odtp?'ODTP usa o Radio ID base e Hotspot Security Password. Porta habitual 54006; o master precisa oferecer este serviço. ESSID não é enviado. Mudanças de protocolo valem após desligar e voltar a ligar. Sem PTT automático e sem fallback silencioso para HBP.':'HBP usa Radio ID + ESSID, geralmente porta 62031. Não oferece inscrição automática sem transmissão; seleção e Scan filtram apenas o RX local.';
+}
+$('#radioProtocol').onchange=()=>{const odtp=$('#radioProtocol').value==='odtp',port=Number($('#masterPort').value);if(odtp&&[62030,62031].includes(port))$('#masterPort').value='54006';else if(!odtp&&port===54006)$('#masterPort').value='62031';updateRadioProtocolForm();};
+function renderReceptionState(){
+  const view=window.ZapDMRProtocol.reception(gatewayStatus,settings,privateContact?.id||settings.selectedTalkgroupId);
+  const note=$('#pttScan small');if(note)note.textContent=(gatewayStatus.protocol||settings.radioProtocol)==='odtp'?'ODTP: inscrição no servidor sem áudio de ativação. Clique para iniciar ou parar Scan.':'HBP: seleção local, sem inscrição automática. Clique para iniciar ou parar Scan.';
+  const target=$('#receptionState');if(target){target.textContent=view.text;target.dataset.state=view.state;}
+  return view;
+}
+window.ZapDMRReception={render:renderReceptionState};

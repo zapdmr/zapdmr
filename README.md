@@ -1,9 +1,9 @@
-# ZapDMR 1.3.1 — beta
+# ZapDMR 1.4.1 — beta
 
 Cliente de rádio digital para Windows e Android, com TalkGroups DMR, PTT, vocoder local, APRS e comunidade ZapDMR. Projeto para operadores de rádio amador licenciados.
 
 - **Portal:** [www.zapdmr.com.br](https://www.zapdmr.com.br)
-- **Distribuição:** [Release v1.3.1](https://github.com/zapdmr/zapdmr/releases/tag/v1.3.1)
+- **Distribuição:** [Release v1.4.1](https://github.com/zapdmr/zapdmr/releases/tag/v1.4.1)
 - **Responsável:** Rizandro Cesar da Silva
 - **Contato e privacidade:** rizandro@gmail.com
 
@@ -13,22 +13,22 @@ Os arquivos são distribuídos como assets da Release, sem guardar executáveis 
 
 | Plataforma / arquivo | Download |
 | --- | --- |
-| Android | [ZapDMR-Android-1.3.1.apk](https://github.com/zapdmr/zapdmr/releases/download/v1.3.1/ZapDMR-Android-1.3.1.apk) |
-| Windows x64 | [ZapDMR-Windows-1.3.1.exe](https://github.com/zapdmr/zapdmr/releases/download/v1.3.1/ZapDMR-Windows-1.3.1.exe) |
-| Código-fonte correspondente completo do aplicativo | [ZapDMR-Android-1.3.1-source.zip](https://github.com/zapdmr/zapdmr/releases/download/v1.3.1/ZapDMR-Android-1.3.1-source.zip) |
+| Android | [ZapDMR-Android-1.4.1.apk](https://github.com/zapdmr/zapdmr/releases/download/v1.4.1/ZapDMR-Android-1.4.1.apk) |
+| Windows x64 | [ZapDMR-Windows-1.4.1.exe](https://github.com/zapdmr/zapdmr/releases/download/v1.4.1/ZapDMR-Windows-1.4.1.exe) |
+| Código-fonte correspondente completo do aplicativo | [ZapDMR-Android-1.4.1-source.zip](https://github.com/zapdmr/zapdmr/releases/download/v1.4.1/ZapDMR-Android-1.4.1-source.zip) |
 
 Consulte os hashes SHA-256 anexados à Release antes da instalação. Os assets públicos do GitHub podem ser baixados diretamente sem preencher o formulário do portal.
 
 ## O que esta versão oferece
 
-- Sessão HBP/BrandMeister com UDP IPv4; troca de TG com desvinculação/ativação configuráveis e filtro de áudio da TG selecionada.
+- Sessão HBP/BrandMeister com UDP IPv4; ODTP com inscrição/cancelamento ao selecionar TG, sem portadora automática; HBP continua disponível como filtro RX local.
 - PTT na tela, TOT, Scan de um alvo por vez e suporte a botões Bluetooth SPP/porta COM.
 - Áudio autônomo no Android; auxiliar de áudio nativo no Windows.
 - Last Heard com dados de operadores e indicadores de atividade recente.
 - APRS com posição opcional e mensagens; recursos dependem da configuração e do equipamento.
 - Cadastro da comunidade, partilha opcional do telefone, diretório autenticado, bloqueios e ZapChat próprio.
 
-**Esta é uma edição beta.** A documentação de implementação e as compilações não confirmam funcionamento de áudio, Bluetooth, GPS e chamadas privadas em todos os aparelhos ou masters. Consulte [as notas 1.3.1](docs/RELEASE-1.3.1.md).
+**Esta é uma edição beta.** A documentação de implementação e as compilações não confirmam funcionamento de áudio, Bluetooth, GPS e chamadas privadas em todos os aparelhos ou masters. Consulte [as notas 1.4.1](docs/RELEASE-1.4.1.md).
 
 ## WhatsApp, ZapChat e autenticação
 
@@ -36,7 +36,7 @@ Consulte os hashes SHA-256 anexados à Release antes da instalação. Os assets 
 
 ZapChat é o chat próprio do ZapDMR, com mensagens cifradas no servidor; **não há cifragem ponta a ponta**. A confirmação por código valida acesso ao número, sem comprovar licença ou titularidade do indicativo/DMR ID.
 
-**A confirmação exige que a ponte WhatsApp do responsável esteja conectada.** A versão 1.3.1 inclui confirmação reversa, fila de envio automático pela ponte local Baileys, reenvio após 60 segundos e seis dígitos com validade de dez minutos. O responsável vincula o número oficial por QR e mantém o computador ligado. O pareamento e a retomada após reinicialização foram confirmados: a API pública informou a ponte conectada em modo `bridge`. Após a correção r2, o responsável recebeu e validou um código real no portal; o número foi marcado como verificado e o download Android foi liberado. A instalação e a ativação dentro do aplicativo permanecem verificações no aparelho. Consulte [o fluxo de confirmação](site/WHATSAPP-OTP.md) e [o registro de 20/10](site/VERIFICACAO-2026-10-20.md). O rádio usa uma sessão independente da comunidade. O app 1.3.1 também não consome o novo canal de recibos ao vivo do backend.
+**A confirmação exige que a ponte WhatsApp do responsável esteja conectada.** A versão 1.4.1 inclui confirmação reversa, fila de envio automático pela ponte local Baileys, reenvio após 60 segundos e seis dígitos com validade de dez minutos. O responsável vincula o número oficial por QR e mantém o computador ligado. O pareamento e a retomada após reinicialização foram confirmados: a API pública informou a ponte conectada em modo `bridge`. Após a correção r2, o responsável recebeu e validou um código real no portal; o número foi marcado como verificado e o download Android foi liberado. A instalação e a ativação dentro do aplicativo permanecem verificações no aparelho. Consulte [o fluxo de confirmação](site/WHATSAPP-OTP.md) e [o registro de 20/10](site/VERIFICACAO-2026-10-20.md). O rádio usa uma sessão independente da comunidade. O app atual consome os recibos ao vivo do ZapChat.
 
 Veja a explicação dos componentes, fluxo de pedidos, credenciais e tokens em [Autenticação](site/AUTENTICACAO.md).
 
@@ -52,7 +52,7 @@ Veja a explicação dos componentes, fluxo de pedidos, credenciais e tokens em [
 | `scripts/` | Scripts de compilação, empacotamento e verificações existentes |
 | `docs/` | Notas e arquitetura |
 
-Este histórico oferece os fontes textuais do aplicativo e do site para leitura e manutenção. Ele **não é, isoladamente, o pacote completo de compilação**: binários, imagens raster, ícones de bandeiras, bibliotecas nativas compiladas, Gradle Wrapper JAR e árvores de dependências nativas de terceiros não estão incluídos. Use o [arquivo de código-fonte correspondente completo da Release](https://github.com/zapdmr/zapdmr/releases/download/v1.3.1/ZapDMR-Android-1.3.1-source.zip) para a distribuição do aplicativo, com suas instruções e componentes. As fontes do site mantidas aqui podem incluir correções posteriores ao pacote do aplicativo 1.3.1.
+Este histórico oferece os fontes textuais do aplicativo e do site para leitura e manutenção. Ele **não é, isoladamente, o pacote completo de compilação**: binários, imagens raster, ícones de bandeiras, bibliotecas nativas compiladas, Gradle Wrapper JAR e árvores de dependências nativas de terceiros não estão incluídos. Use o [arquivo de código-fonte correspondente completo da Release](https://github.com/zapdmr/zapdmr/releases/download/v1.4.1/ZapDMR-Android-1.4.1-source.zip) para a distribuição do aplicativo, com suas instruções e componentes. As fontes do site mantidas aqui podem incluir correções posteriores ao pacote do aplicativo 1.4.1.
 
 Configurações específicas da máquina, bancos privados, números cadastrados, conversas, tokens, credenciais de publicação e chaves de assinatura não fazem parte do repositório. Os arquivos de exemplo não contêm os segredos de produção.
 
@@ -77,3 +77,12 @@ O código do ZapDMR é distribuído sob [GPL-3.0-only](LICENSE). Preserve os [av
 [Implementação e limites](site/ZAPCHAT-ANEXOS.md) · [Avisos de versões](site/AVISOS-VERSOES.md).
 
 Verificação local com dois clientes e banco isolado concluída. Os novos builds ainda precisam de validação de áudio e troca de anexos nos aparelhos reais. O PC da ponte WhatsApp deve permanecer ligado e online.
+
+## Rádio e catálogo 1.4.1
+
+- Somente Nacionais (34 TGs) e Mundiais (31 TGs) pré-configuradas. Outras TGs por Cadastrar TG; cadastros antigos preservados.
+- ODTP/serviço 0x21, UDP 54006 habitual, Radio ID base e Hotspot Security Password. HBP não é tratado como protocolo de inscrição.
+- Conexão real com o master Brasil confirmou voz AMBE recebida em TG91 e TG72426 antes de qualquer PTT. Sem áudio silencioso ou TG4000 automático. Reprodução física e microfone ainda exigem validação nos aparelhos.
+- Testes locais A–G e núcleo Java Android aprovados.
+
+[Análise, arquivos e evidências da versão](docs/RELEASE-1.4.1.md).

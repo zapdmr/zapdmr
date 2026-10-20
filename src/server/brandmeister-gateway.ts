@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import dgram, { type Socket } from 'node:dgram';
+import { OpenTerminal, ODTP, terminalHeader } from './open-terminal';
 import { DEFAULT_HOTSPOT_FREQUENCY_HZ, type AppSettings } from './types';
 import { buildFullLcBurst, buildVoiceBurst, extractVoiceCodewords, type DmrCallType } from './dmr-voice-framer';
 
@@ -29,6 +30,9 @@ interface ConnectResult { accepted: boolean; code: string; message: string }
 /** HBP session, AMBE sidecar bridge, DMR framing and DMRD relay. */
 export class BrandMeisterGateway extends EventEmitter {
   private socket?: Socket;
+  private terminal?: OpenTerminal;
+  private protocol: 'hbp' | 'odtp' = 'hbp';
+  private rxTarget = 724;
   private state: GatewayState = 'disconnected';
   private stateMessage = 'Desligado.';
   private lastErrorCode?: string;
@@ -77,6 +81,8 @@ export class BrandMeisterGateway extends EventEmitter {
   status() {
     return {
       state: this.state,
+      protocol: this.protocol,
+      reception: this.terminal?.snapshot() || {protocol:this.protocol,supported:this.protocol==='odtp',state:this.state==='connected'?'unsupported':this.state,targetTalkgroupId:this.rxTarget,message:this.state==='connected'?'Homebrew/HBP não oferece inscrição de TG sem PTT. Use ODTP num master compatível.':this.stateMessage},
       errorCode: this.lastErrorCode,
       connected: this.state === 'connected',
       pttReady: this.state === 'connected' && this.audioReady,
@@ -234,6 +240,12 @@ export class BrandMeisterGateway extends EventEmitter {
     return extractVoiceCodewords(packet.subarray(DMRD_HEADER_LENGTH, DMRD_BER_OFFSET));
   }
 
+  selectReception(id:number,callType:DmrCallType='group') {
+    this.rxTarget=id;
+    this.terminal?.select(id,callType==='private');
+    this.emit('status',this.status());
+  }
+
   async connect(settings: AppSettings, password?: string): Promise<ConnectResult> {
     if (this.state !== 'disconnected' && this.state !== 'error') {
       return { accepted: false, code: 'ALREADY_CONNECTED', message: 'Já existe uma sessão HBP em andamento.' };
@@ -265,6 +277,8 @@ export class BrandMeisterGateway extends EventEmitter {
       return this.fail('INVALID_HOTSPOT_ID', 'O ID composto do hotspot não é válido.');
 
     await this.disconnect(false);
+    this.protocol=settings.radioProtocol==='odtp'?'odtp':'hbp';
+    this.rxTarget=settings.selectedTalkgroupId;
     this.callsign = callsign;
     this.radioId = Number(dmrId);
     this.hotspotId = id;
@@ -292,19 +306,37 @@ export class BrandMeisterGateway extends EventEmitter {
 
     const socket = dgram.createSocket('udp4');
     this.socket = socket;
-    socket.on('message', (packet) => this.handlePacket(packet));
+    socket.on('message', (packet) => {
+      if(this.socket!==socket)return;
+      if(this.terminal){this.usageRxBytes+=packet.length;this.emit('usage',this.usageSnapshot());this.terminal.receive(packet);}else this.handlePacket(packet);
+    });
+    if(this.protocol==='odtp'){
+      const terminal=new OpenTerminal(this.radioId!,password!,packet=>this.send(packet));this.terminal=terminal;
+      terminal.on('reception',()=>this.emit('status',this.status()));
+      terminal.on('failure',(error:Error)=>this.failSession('ODTP_FAILED',error.message));
+      terminal.on('authenticated',()=>{
+        this.clearConnectTimer();this.setState('connected','ODTP autenticado; solicitando inscrição…');
+        const pending=this.pendingConnect;this.pendingConnect=undefined;pending?.resolve({accepted:true,code:'CONNECTED',message:this.stateMessage});
+      });
+      terminal.on('voice',(call:{source:number;destination:number;individual:boolean;streamId:number;words:Buffer[]})=>{
+        const frame=Buffer.alloc(55);frame.write('DMRD');frame.writeUIntBE(call.source,5,3);frame.writeUIntBE(call.destination,8,3);frame[15]=0x10|(call.individual?0x40:0);frame.writeUInt32BE(call.streamId,16);
+        buildVoiceBurst(call.words,true,1,{destinationId:call.destination,sourceId:call.source,callType:call.individual?'private':'group',sequence:0}).copy(frame,20);
+        if(!call.individual)this.noteTalkgroupActivity(call.destination);this.emit('frame',frame);
+      });
+    }
     socket.on('error', (error) => this.failSession('UDP_ERROR', `Erro no socket UDP: ${error.message}`));
 
     return new Promise<ConnectResult>((resolve) => {
       this.pendingConnect = {
         resolve
       };
-      this.connectTimer = setTimeout(() => this.failSession('HBP_TIMEOUT', 'O master não concluiu a autenticação HBP em 15 segundos.'), LOGIN_TIMEOUT_MS);
+      this.connectTimer = setTimeout(() => this.failSession(this.protocol==='odtp'?'ODTP_TIMEOUT':'HBP_TIMEOUT', `O master não concluiu a autenticação ${this.protocol.toUpperCase()} em 15 segundos. Confira protocolo, porta e senha.`), LOGIN_TIMEOUT_MS);
       // Send the first login packet only after Node confirms that the UDP
       // socket is associated with the master. A connect error must not fall
       // through to send(), where its callback could be misread as a port.
       socket.once('connect', () => {
         if (this.socket !== socket || this.state !== 'resolving') return;
+        if(this.terminal){this.setState('waiting-login','Conectando ao servidor ODTP…');void this.terminal.start(this.rxTarget).catch(error=>this.failSession('ODTP_FAILED',error.message));return;}
         this.setState('waiting-login', 'Enviando pedido de registo HBP…');
         this.send(this.makeIdPacket('RPTL')).catch((sendError) =>
           this.failSession('UDP_SEND_FAILED', `Falha ao enviar RPTL: ${(sendError as Error).message}`));
@@ -325,7 +357,9 @@ export class BrandMeisterGateway extends EventEmitter {
       pending.resolve({ accepted: false, code: 'DISCONNECTED', message: 'Ligação cancelada.' });
     }
     const socket = this.socket;
-    if (socket && this.hotspotId !== undefined) {
+    const terminal=this.terminal;
+    if(terminal){await terminal.close().catch(()=>{});this.terminal=undefined;}
+    if (!terminal && socket && this.hotspotId !== undefined) {
       const close = Buffer.alloc(9);
       close.write('RPTCL', 0, 'ascii');
       close.writeUInt32BE(this.hotspotId, 5);
@@ -358,6 +392,8 @@ export class BrandMeisterGateway extends EventEmitter {
   }
 
   async setPtt(active: boolean, talkgroupId: number, slot: 1 | 2 = 1, callType: DmrCallType = 'group'): Promise<ConnectResult> {
+    if(active&&this.terminal&&['connecting','subscribing','authenticating','error','unsubscribed'].includes(this.terminal.snapshot().state))
+      return {accepted:false,code:'ODTP_SUBSCRIPTION_PENDING',message:'Aguarde a resposta da inscrição ODTP antes de transmitir.'};
     if (active) {
       if (this.state !== 'connected')
         return { accepted: false, code: 'NOT_CONNECTED', message: 'Ligue primeiro ao master BrandMeister.' };
@@ -435,6 +471,7 @@ export class BrandMeisterGateway extends EventEmitter {
   }
 
   async sendTalkgroupBurst(talkgroupId: number, slot: 1 | 2, silenceCodewords: Buffer[]): Promise<ConnectResult> {
+    if(this.protocol==='odtp')return {accepted:false,code:'ODTP_NO_BURST',message:'ODTP usa inscrição/cancelamento, sem rajadas de ativação.'};
     if (this.state !== 'connected')
       return { accepted: false, code: 'NOT_CONNECTED', message: 'Ligue primeiro ao master BrandMeister.' };
     if (this.txArmed || this.talkgroupBurstActive)
@@ -547,6 +584,7 @@ export class BrandMeisterGateway extends EventEmitter {
 
   /** Relay a complete codec/framer-produced 55-byte DMRD or 71-byte trunking datagram. */
   async sendDmrFrame(encodedPacket: Buffer): Promise<ConnectResult> {
+    if(this.protocol==='odtp'&&!this.terminal)return {accepted:false,code:'NOT_CONNECTED',message:'Sessão ODTP encerrada.'};
     if (this.state !== 'connected' || !this.socket || this.radioId === undefined || this.hotspotId === undefined)
       return { accepted: false, code: 'NOT_CONNECTED', message: 'Não há sessão HBP ligada.' };
     if (!this.txArmed || this.txTalkgroupId === undefined)
@@ -569,7 +607,11 @@ export class BrandMeisterGateway extends EventEmitter {
       return { accepted: false, code: 'OUT_OF_ORDER_FRAME', message: `Sequência esperada: ${this.sequence}.` };
 
     try {
-      await this.send(encodedPacket);
+      if(this.terminal){
+        const kind=encodedPacket[15]&0x3f;
+        if(kind===0x21||kind===0x22)await this.terminal.transmit(kind===0x21?ODTP.header:ODTP.terminator,terminalHeader(this.txTalkgroupId!,this.radioId!,this.txCallType==='private'));
+        else await this.terminal.transmit(ODTP.audio,Buffer.concat(extractVoiceCodewords(encodedPacket.subarray(20,53))));
+      }else await this.send(encodedPacket);
       this.sequence = (encodedPacket[4] + 1) & 0xff;
       this.txActive = true;
       if (this.txCallType === 'group') this.noteTalkgroupActivity(encodedPacket.readUIntBE(8, 3));
@@ -763,6 +805,7 @@ export class BrandMeisterGateway extends EventEmitter {
 
   private failSession(code: string, message: string) {
     if (this.state === 'error' || this.state === 'disconnected') return;
+    this.terminal?.stop();this.terminal=undefined;
     const pending = this.pendingConnect;
     this.pendingConnect = undefined;
     this.clearTimers();

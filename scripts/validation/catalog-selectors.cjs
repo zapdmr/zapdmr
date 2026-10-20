@@ -9,4 +9,22 @@ const missing = [...new Set(references.filter((id) => !ids.includes(id)))];
 assert.deepEqual(duplicates, [], 'Duplicate HTML IDs');
 assert.deepEqual(missing, [], 'Missing JavaScript selector targets');
 assert(html.includes('/talkgroup-activity.js'));
-console.log(`PASS: ${ids.length} unique HTML IDs and all literal JavaScript ID selectors resolve`);
+for (const id of ['quickCatalogFilters','quickCatalogHint','quickTalkgroupSelect','category','newTalkgroupCategory']) assert(ids.includes(id), `Missing catalog control ${id}`);
+const quickFilters = [...html.matchAll(/\bdata-quick-catalog-filter=["']([^"']+)["']/g)].map(match => match[1]);
+assert.deepEqual(quickFilters, ['all','national','world'], 'PTT filter controls must provide all, national and world choices');
+const customCategoryOptions = html.match(/<select\b[^>]*id="newTalkgroupCategory"[^>]*>([\s\S]*?)<\/select>/)?.[1] || '';
+const offered = [...customCategoryOptions.matchAll(/<option(?:\s[^>]*)?>([^<]+)<\/option>/g)].map(match => match[1]);
+assert.deepEqual(offered, ['Nacionais','Mundiais'], 'Custom TG form presents only the two agreed category labels');
+for (const category of offered) {
+  assert(js.includes(category), `Catalog rendering must recognize ${category}`);
+}
+const android = fs.readFileSync('android/app/src/main/java/br/radio/zapdmr/RadioSessionService.java', 'utf8');
+const tune = android.split('} else if (ACTION_TUNE.equals(action)) {')[1]?.split('} else if (ACTION_PTT_DOWN.equals(action)) {')[0];
+assert(tune, 'Android tune action must remain explicit');
+assert(!/requestLink\(|silentLink\(|sendDmr\(/.test(tune), 'Selecting any Android TG, including a custom TG 4000, must not key the radio');
+assert(/ACTION_UNLINK[\s\S]*?requestLink\(4000,selectedSlot\)/.test(android), 'Explicit manual unlink remains available');
+const server = fs.readFileSync('src/server/index.ts', 'utf8');
+const passiveRoute = server.split("app.post('/api/link-talkgroup'")[1]?.split("app.post('/api/disconnect-talkgroup'")[0];
+assert(passiveRoute && passiveRoute.includes('TG_FILTER_ONLY'), 'Windows selection keeps the passive filter route');
+assert(!/sendTalkgroupBurst\(|setPtt\(|disconnectTalkgroup\(/.test(passiveRoute), 'Windows selection must not send automatic activation or TG 4000');
+console.log(`PASS: ${ids.length} unique HTML IDs, literal selectors, two-category PTT controls and passive Windows/Android selection guards`);

@@ -75,6 +75,8 @@ public final class RadioSessionService extends Service {
     private final AtomicBoolean ptt = new AtomicBoolean(false);
     private final List<byte[]> txCodewords = new ArrayList<>();
     private volatile DatagramSocket socket;
+    private volatile OpenTerminal terminal;
+    private boolean useOpenTerminal(){return "odtp".equals(settings.optString("radioProtocol","hbp"));}
     private volatile Network activeNetwork;
     private volatile boolean networkRetry;
     private ConnectivityManager connectivity;
@@ -183,6 +185,7 @@ public final class RadioSessionService extends Service {
     private volatile int linkedTalkgroup,linkedSlot=1;
     private volatile long selectionVersion;
     private void requestLink(int tg,int slot){
+        if(useOpenTerminal()){OpenTerminal client=terminal;if(client!=null)try{client.select(tg==4000?0:tg,false);}catch(Exception error){emit("error",json("message",safeMessage(error)));}return;}
         final long version=++selectionVersion;
         if(tg<1||tg>0xffffff||!connected||privateTargetId>0)return;
         if(tg!=4000){releasePlayer();emitAudioLevel("RX",new byte[320],tg,0);stateMessage="TG "+tg+" selecionada em modo passivo. Receção depende da TG estática ou do primeiro PTT.";emit("link",json("talkgroupId",tg,"linked",false,"passive",true,"message",stateMessage));emitStatus();return;}
@@ -285,13 +288,16 @@ public final class RadioSessionService extends Service {
             stopNetwork(true);
             stopSelf();
         } else if (ACTION_UNLINK.equals(action)) {
-            privateTargetId=0;requestLink(4000,selectedSlot);
+            privateTargetId=0;selectionVersion++;releasePlayer();
+            if(terminal!=null){try{terminal.select(0,false);}catch(Exception error){emit("error",json("message",safeMessage(error)));}}
+            else requestLink(4000,selectedSlot);
         } else if (ACTION_TARGET.equals(action)) {
             if(ptt.get()||testingAudio.get()||pendingLinks.get()>0){emit("error",json("message","Termine a transmissão ou troca atual antes de escolher um contacto."));return START_NOT_STICKY;}
             int destination=intent.getIntExtra("destinationId",0);String type=intent.getStringExtra("callType");
-            if("group".equals(type)){privateTargetId=0;selectionVersion++;releasePlayer();stateMessage="TG "+selectedTalkgroup+" selecionada.";emit("selection",statusData());emitStatus();return START_NOT_STICKY;}
+            if("group".equals(type)){privateTargetId=0;selectionVersion++;releasePlayer();stateMessage="TG "+selectedTalkgroup+" selecionada.";if(terminal!=null)try{terminal.select(selectedTalkgroup,false);}catch(Exception error){emit("error",json("message",safeMessage(error)));}emit("selection",statusData());emitStatus();return START_NOT_STICKY;}
             if(!"private".equals(type)||destination<1||destination>0xffffff||destination==settings.optInt("dmrId",0)){emit("error",json("message","O contacto precisa de um Radio ID válido para chamada individual."));return START_NOT_STICKY;}
             privateTargetId=destination;selectionVersion++;selectedSlot=intent.getIntExtra("slot",selectedSlot)==2?2:1;releasePlayer();emitAudioLevel("RX",new byte[320],destination,0);
+            if(terminal!=null)try{terminal.select(destination,true);}catch(Exception error){emit("error",json("message",safeMessage(error)));}
             stateMessage="Contacto "+destination+" selecionado. Prima PTT para chamada individual.";emit("selection",statusData());emitStatus();
             if(sessionDesired&&!connected&&(networkThread==null||!networkThread.isAlive())){reconnectAttempt=0;connectHbp();}
         } else if (ACTION_USAGE_RESET.equals(action)) {
@@ -302,11 +308,15 @@ public final class RadioSessionService extends Service {
         } else if (ACTION_LOG.equals(action)) {
             emit("systemLog",RadioNotifications.record(intent.getStringExtra("category"),intent.getStringExtra("message")));
         } else if (ACTION_TUNE.equals(action)) {
-            privateTargetId=0;
+            // Selecting a destination is passive even for a custom TG 4000.
+            // Only the explicit ACTION_UNLINK button may transmit that command.
+            privateTargetId=0;selectionVersion++;
             selectedTalkgroup = intent.getIntExtra("talkgroupId", 0);
             selectedSlot = intent.getIntExtra("slot", 1) == 2 ? 2 : 1;
             releasePlayer();emitAudioLevel("RX",new byte[320],selectedTalkgroup,0);
-            emit("selection", statusData());requestLink(selectedTalkgroup,selectedSlot);
+            if(terminal!=null)try{terminal.select(selectedTalkgroup,false);}catch(Exception error){emit("error",json("message",safeMessage(error)));}
+            stateMessage=useOpenTerminal()?"TG "+selectedTalkgroup+" — solicitando inscrição ODTP…":"Homebrew/HBP não oferece inscrição de TG sem PTT. Use ODTP num master compatível.";
+            emit("selection", statusData());emit("link",json("talkgroupId",selectedTalkgroup,"linked",false,"passive",true,"message",stateMessage));emitStatus();
             if(sessionDesired&&!connected&&(networkThread==null||!networkThread.isAlive()))connectHbp();
         } else if (ACTION_PTT_DOWN.equals(action)) {
             startPtt(intent.getIntExtra("talkgroupId", selectedTalkgroup), intent.getIntExtra("slot", selectedSlot));
@@ -406,7 +416,7 @@ public final class RadioSessionService extends Service {
     private synchronized void connectHbp() {
         if(networkThread!=null&&networkThread.isAlive())return;
         if (!validProfile()) { fail("INVALID_PROFILE", "Complete indicativo, Radio ID, ESSID, master e palavra-passe nas Definições."); return; }
-        state = "resolving"; stateMessage = "A resolver o master HBP…"; emitStatus();
+        state = "resolving"; stateMessage = "A resolver o master "+(useOpenTerminal()?"ODTP":"HBP")+"…"; emitStatus();
         networkThread = new Thread(this::networkLoop, "ZapDMR-HBP-UDP");
         networkThread.start();
     }
@@ -432,7 +442,7 @@ public final class RadioSessionService extends Service {
                 if(connected)retryDelay=3000;
                 connected = false;
                 state = "error";
-                stateMessage = transitionReconnect?"A trocar TG · renovando sessão HBP…":"Ligação HBP perdida: " + safeMessage(error);
+                stateMessage = transitionReconnect?"A trocar TG · renovando sessão HBP…":"Ligação "+(useOpenTerminal()?"ODTP":"HBP")+" perdida: " + safeMessage(error);
                 stopPtt();
                 emitStatus();
                 closeSocket();
@@ -465,6 +475,7 @@ public final class RadioSessionService extends Service {
             udp.connect(ipv4,port);udp.setSoTimeout(750);socket=udp;
             Log.i(TAG,"HBP IPv4: "+ipv4.getHostAddress()+":"+port);
         }catch(Exception error){udp.close();throw error;}
+        if(useOpenTerminal()){receiveTerminal(udp);return;}
         int hotspotId = Integer.parseInt(settings.getString("dmrId") + settings.getString("essid"));
         sendHbp(idPacket("RPTL", hotspotId));
         state = "waiting-login"; stateMessage = "A aguardar desafio do master…"; emitStatus();
@@ -514,6 +525,30 @@ public final class RadioSessionService extends Service {
         }
     }
 
+    private void receiveTerminal(DatagramSocket udp) throws Exception {
+        final long loginDeadline=System.currentTimeMillis()+15000;
+        OpenTerminal client=new OpenTerminal(Integer.parseInt(settings.getString("dmrId")),password,this::sendHbp,new OpenTerminal.Listener(){
+            private long previousCall=-1;
+            public void authenticated(){connected=true;reconnectAttempt=0;state="connected";acquireWakeLock();controlsHandler.post(RadioSessionService.this::startVoxMonitor);emitStatus();}
+            public void reception(String reception,int target,String message){stateMessage=message;emitStatus();}
+            public void voice(int source,int destination,boolean individual,byte[][] words) throws Exception {
+                boolean selected=privateTargetId>0?individual&&destination==settings.optInt("dmrId")&&source==privateTargetId:!individual&&destination==selectedTalkgroup;
+                if(!selected||testingAudio.get()||ptt.get())return;
+                emit("activity",json("talkgroupId",individual?source:destination,"lastActivityAt",System.currentTimeMillis(),"sourceId",source,"callType",individual?"private":"group","slot",selectedSlot,"global",false));
+                final long selection=selectionVersion;VocoderHelper helper=ensureVocoder();if(helper==null)return;
+                OpenTerminal current=terminal;long call=current==null?0:current.stream();
+                if(previousCall!=call){previousCall=call;if(controls().optBoolean("beepIncoming"))playTone(android.media.ToneGenerator.TONE_PROP_BEEP);if(radioNotifications!=null){JSONObject log=radioNotifications.onVoice(source,destination,call,individual,settings);if(log!=null)emit("systemLog",log);}}
+                try{for(byte[] word:words){byte[] pcm=helper.decodeFec(word);if(selection!=selectionVersion)return;emitAudioLevel("RX",pcm,individual?source:destination,source);playPcm(pcm);}}
+                catch(Exception error){if(System.currentTimeMillis()-lastCodecFailure>5000){lastCodecFailure=System.currentTimeMillis();emit("error",json("message","Falha no vocoder RX: "+safeMessage(error)));}VocoderHelper broken=vocoder;vocoder=null;if(broken!=null)broken.stop();}
+            }
+        });
+        terminal=client;client.start(privateTargetId>0?privateTargetId:selectedTalkgroup);if(privateTargetId>0)client.select(privateTargetId,true);
+        byte[] data=new byte[2048];
+        try{while(sessionDesired&&socket==udp){if(!connected&&System.currentTimeMillis()>loginDeadline)throw new java.io.IOException("ODTP não autenticado em 15 segundos; confira porta e suporte do master.");
+            client.tick();try{DatagramPacket packet=new DatagramPacket(data,data.length);udp.receive(packet);usageRxBytes.addAndGet(packet.getLength());saveUsage(false);client.receive(java.util.Arrays.copyOfRange(packet.getData(),packet.getOffset(),packet.getOffset()+packet.getLength()));}catch(java.net.SocketTimeoutException ignored){}
+        }}finally{if(terminal==client)terminal=null;client.close();}
+    }
+
     private void handleDmrFrame(byte[] packet) throws Exception {
         int tg = read24(packet, 8);
         int flags = packet[15] & 255;
@@ -540,6 +575,8 @@ public final class RadioSessionService extends Service {
     }
 
     private void startPtt(int tg, int slot) {
+        OpenTerminal receiver=terminal;
+        if(receiver!=null&&java.util.Arrays.asList("connecting","subscribing","authenticating","error","unsubscribed").contains(receiver.state())){emit("error",json("message","Aguarde a resposta da inscrição ODTP antes de transmitir."));return;}
         if(privateTargetId>0)tg=privateTargetId;
         if(testingAudio.get()||linking.get()||pendingLinks.get()>0){emit("error",json("message","Aguarde o teste ou vinculação silenciosa terminar."));return;}
         if(!remoteAllowed()){emit("error",json("message","Ative falar com ecrã bloqueado para transmitir nesta condição."));return;}
@@ -672,6 +709,14 @@ public final class RadioSessionService extends Service {
 
     private void sendDmr(byte[] slot,int flags) throws Exception {
         if(!connected||socket==null)throw new java.io.IOException("Sessão HBP desligada.");
+        OpenTerminal client=terminal;
+        if(useOpenTerminal()&&client==null)throw new java.io.IOException("Sessão ODTP encerrada.");
+        if(client!=null){
+            int kind=flags&0x3f;
+            if(kind==0x21||kind==0x22)client.transmit(kind==0x21?0x911:0x912,OpenTerminal.header(txTalkgroup,Integer.parseInt(settings.getString("dmrId")),txPrivateCall));
+            else{ByteArrayOutputStream words=new ByteArrayOutputStream();for(byte[] word:DmrFrameEngine.extractVoice(slot))words.write(word);client.transmit(0x920,words.toByteArray());}
+            return;
+        }
         byte[] out=new byte[55]; System.arraycopy("DMRD".getBytes(StandardCharsets.US_ASCII),0,out,0,4);
         out[4]=(byte)(packetSequence++ & 255); put24(out,5,Integer.parseInt(settings.getString("dmrId"))); put24(out,8,txTalkgroup);
         long hotspot=Long.parseLong(settings.getString("dmrId")+settings.getString("essid")); put32(out,11,hotspot);
@@ -720,7 +765,7 @@ public final class RadioSessionService extends Service {
     private void createNotificationChannel(){if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.O){NotificationManager manager=getSystemService(NotificationManager.class);manager.createNotificationChannel(new NotificationChannel(CHANNEL_ID,"Sessão de rádio ZapDMR",NotificationManager.IMPORTANCE_LOW));}}
     private void acquireWakeLock(){try{PowerManager pm=(PowerManager)getSystemService(Context.POWER_SERVICE);if(wakeLock==null){wakeLock=pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"ZapDMR:RadioSession");wakeLock.setReferenceCounted(false);}if(!wakeLock.isHeld())wakeLock.acquire();}catch(Exception error){Log.w(TAG,"Wake lock não disponível",error);}}
     private void releaseWakeLock(){try{if(wakeLock!=null&&wakeLock.isHeld())wakeLock.release();}catch(Exception ignored){} }
-    private JSONObject statusData(){return json("state",state,"connected",connected,"pttReady",connected&&vocoder!=null&&!linking.get()&&pendingLinks.get()==0,"talkgroupBurstActive",pendingLinks.get()>0,"voiceCodecAvailable",vocoder!=null,"talkgroupId",selectedTalkgroup,"target",json("id",privateTargetId>0?privateTargetId:selectedTalkgroup,"callType",privateTargetId>0?"private":"group"),"usage",usageData(),"reconnectAttempt",reconnectAttempt,"maxReconnectAttempts",maxReconnectAttempts(),"transitionReconnect",transitionReconnect,"message",stateMessage);}
+    private JSONObject statusData(){OpenTerminal client=terminal;return json("protocol",useOpenTerminal()?"odtp":"hbp","reception",json("protocol",useOpenTerminal()?"odtp":"hbp","supported",useOpenTerminal(),"state",client!=null?client.state():useOpenTerminal()?state:connected?"unsupported":state,"targetTalkgroupId",client!=null?client.target():selectedTalkgroup,"message",client!=null?client.message():useOpenTerminal()?stateMessage:connected?"Homebrew/HBP não oferece inscrição sem PTT. Use ODTP num master compatível.":stateMessage),"state",state,"connected",connected,"pttReady",connected&&vocoder!=null&&!linking.get()&&pendingLinks.get()==0,"talkgroupBurstActive",pendingLinks.get()>0,"voiceCodecAvailable",vocoder!=null,"talkgroupId",selectedTalkgroup,"target",json("id",privateTargetId>0?privateTargetId:selectedTalkgroup,"callType",privateTargetId>0?"private":"group"),"usage",usageData(),"reconnectAttempt",reconnectAttempt,"maxReconnectAttempts",maxReconnectAttempts(),"transitionReconnect",transitionReconnect,"message",stateMessage);}
     private void emitStatus(){emit("status",statusData());int type=ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE;if(ptt.get()||(connected&&(controls().optBoolean("allowLocked")||controls().optBoolean("voxEnabled"))&&ContextCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED))type|=ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;startForegroundCompat(NOTIFICATION_ID,notification(stateMessage),type);}
     private void emit(String event,JSONObject data){broadcastEvent(event,data);if(radioNotifications!=null){JSONObject entry=radioNotifications.onEvent(event,data,settings);if(entry!=null)broadcastEvent("systemLog",entry);}}
     private void broadcastEvent(String event,JSONObject data){Intent message=new Intent(ACTION_EVENT).setPackage(getPackageName()).putExtra(EXTRA_EVENT,event).putExtra(EXTRA_DATA,data==null?"{}":data.toString());sendBroadcast(message);}
@@ -755,7 +800,8 @@ public final class RadioSessionService extends Service {
     private void closeSocket(){DatagramSocket active=socket;socket=null;if(active!=null)active.close();}
     private void stopNetwork(boolean sendClose){
         stopVoxMonitor();stopPtt(); DatagramSocket active=socket;
-        if(sendClose&&active!=null&&connected){try{long id=Long.parseLong(settings.getString("dmrId")+settings.getString("essid"));ByteArrayOutputStream close=new ByteArrayOutputStream();close.write("RPTCL".getBytes(StandardCharsets.US_ASCII));writeInt(close,id);synchronized(socketLock){active.send(new DatagramPacket(close.toByteArray(),close.size()));usageTxBytes.addAndGet(close.size());saveUsage(false);}}catch(Exception ignored){}}
+        OpenTerminal client=terminal;if(client!=null){terminal=null;client.close();}
+        if(!useOpenTerminal()&&sendClose&&active!=null&&connected){try{long id=Long.parseLong(settings.getString("dmrId")+settings.getString("essid"));ByteArrayOutputStream close=new ByteArrayOutputStream();close.write("RPTCL".getBytes(StandardCharsets.US_ASCII));writeInt(close,id);synchronized(socketLock){active.send(new DatagramPacket(close.toByteArray(),close.size()));usageTxBytes.addAndGet(close.size());saveUsage(false);}}catch(Exception ignored){}}
         connected=false;closeSocket();Thread t=networkThread;networkThread=null;if(t!=null&&t!=Thread.currentThread()){t.interrupt();try{t.join(750);}catch(InterruptedException error){Thread.currentThread().interrupt();}}releaseWakeLock();
         releasePlayer();abandonRxFocus();
         if(vocoder!=null){vocoder.stop();vocoder=null;}

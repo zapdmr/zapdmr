@@ -18,7 +18,7 @@ interface StartOptions {
   audioSidecarExe?: string; audioAssetsDir?: string; audioPipeName?: string; lastHeardUrl?: string;
 }
 const CUSTOM_TALKGROUP_CATEGORIES = new Set([
-  'Nacionais e mundiais', 'Regiões', 'Estados', 'Redes externas', 'Especiais'
+  'Nacionais', 'Mundiais', 'Mundiais/Países', 'Nacionais e mundiais', 'Regiões', 'Estados', 'Redes externas', 'Especiais'
 ]);
 const DISCONNECT_SILENCE_CODEWORDS = 18;
 const PARTICIPANT_RETENTION_MS = 30 * 60 * 1000;
@@ -117,7 +117,10 @@ function cleanSettings(value: Partial<AppSettings>): AppSettings {
     Number.isInteger(candidate) ? Math.min(max, Math.max(min, Number(candidate))) : fallback;
   const totLimitSeconds = integerSetting(value.totLimitSeconds, 180, 30, 900);
   const serverType: ServerType = value.serverType === 'other' ? 'other' : 'brandmeister';
-  const masterPort = integerSetting(value.masterPort, 62031, 1, 65535);
+  const legacyPort=integerSetting(value.masterPort,62031,1,65535);
+  const explicitProtocol=value.radioProtocol==='hbp'||value.radioProtocol==='odtp';
+  const radioProtocol=explicitProtocol?value.radioProtocol!:serverType==='other'||![62030,62031,54006].includes(legacyPort)?'hbp':'odtp';
+  const masterPort=!explicitProtocol&&radioProtocol==='odtp'&&[62030,62031].includes(legacyPort)?54006:legacyPort;
   const cleanCoordinate = (candidate: unknown, min: number, max: number): string => {
     const text = typeof candidate === 'string' || typeof candidate === 'number' ? String(candidate).trim() : '';
     if (!text) return '';
@@ -132,6 +135,7 @@ function cleanSettings(value: Partial<AppSettings>): AppSettings {
     txFrequencyHz: cleanFrequency(value.txFrequencyHz),
     masterHost: typeof value.masterHost === 'string' ? value.masterHost.trim().slice(0, 180) : '',
     masterPort,
+    radioProtocol,
     serverType,
     staticTalkgroups: typeof value.staticTalkgroups === 'string' ? value.staticTalkgroups.replace(/[^\d,;\s]/g, '').slice(0, 500) : '',
     locationName: typeof value.locationName === 'string' ? value.locationName.trim().slice(0, 120) : '',
@@ -241,7 +245,7 @@ export async function startServer(options: StartOptions = {}) {
   const reconnectDelaysMs = [3000, 5000, 10000, 15000, 30000, 60000];
   const audioRestartDelaysMs = [2000, 5000, 10000, 15000, 30000, 60000];
   const retryableGatewayErrors = new Set([
-    'UDP_ERROR', 'UDP_SEND_FAILED', 'UDP_CONNECT_FAILED', 'HBP_TIMEOUT',
+    'UDP_ERROR', 'UDP_SEND_FAILED', 'UDP_CONNECT_FAILED', 'HBP_TIMEOUT', 'ODTP_TIMEOUT', 'ODTP_FAILED',
     'MASTER_TIMEOUT', 'MASTER_CLOSED', 'MASTER_UNREACHABLE'
   ]);
 
@@ -933,6 +937,7 @@ export async function startServer(options: StartOptions = {}) {
     const id=Number(req.body?.destinationId),privateCall=req.body?.callType==='private';
     if(privateCall&&(!Number.isInteger(id)||id<1||id>0xffffff||id===Number(settings.dmrId)))return res.status(400).json({message:'Radio ID de destino inválido.'});
     voiceTarget=privateCall?{id,callType:'private'}:null;
+    gateway.selectReception(privateCall?id:Number(settings.selectedTalkgroupId),privateCall?'private':'group');
     if(audioClient)try{audioClient.send(AudioSidecarMessage.clearRx);}catch{}
     log(privateCall?`Destino privado preparado: Radio ID ${id}. Transmite apenas com PTT.`:`Destino de grupo restaurado: TG ${settings.selectedTalkgroupId}.`);
     broadcast('status',status());return res.json({target:voiceTarget||{id:settings.selectedTalkgroupId,callType:'group'}});
@@ -1373,14 +1378,15 @@ export async function startServer(options: StartOptions = {}) {
     const id=Number(req.body?.talkgroupId);
     if(!Number.isInteger(id)||id<1||id>0xffffff)return res.status(400).json({message:'TG inválida.'});
     if(gateway.status().pttArmed||audioTestRunning||disconnectTalkgroupPending)return res.status(409).json({message:'Termine PTT ou teste antes de trocar TG.'});
-    voiceTarget=null;rxTargetTalkgroupId=id;++linkRevision;
+    voiceTarget=null;rxTargetTalkgroupId=id;++linkRevision;gateway.selectReception(id);
     if(audioClient)try{audioClient.send(AudioSidecarMessage.clearRx);}catch{}
-    log(`TG ${id}: filtro RX passivo; nenhum DMRD de ativação enviado.`);
+    log(`TG ${id}: ${gateway.status().protocol==='odtp'?'inscrição ODTP solicitada':'filtro HBP local'}; nenhum áudio de ativação enviado.`);
     broadcast('status',status());
-    return res.json({accepted:true,code:'TG_FILTER_ONLY',message:'TG selecionada em modo passivo. Receção depende de TG estática no master ou do primeiro PTT.'});
+    return res.json({accepted:true,code:gateway.status().protocol==='odtp'?'TG_SUBSCRIPTION_REQUESTED':'TG_FILTER_ONLY',reception:gateway.status().reception,message:gateway.status().reception.message});
   });
   app.post('/api/disconnect-talkgroup', async (_req, res) => {
     const currentGatewayStatus = gateway.status();
+    if(currentGatewayStatus.connected&&currentGatewayStatus.protocol==='odtp'){if(currentGatewayStatus.pttArmed)return res.status(409).json({message:'Termine o PTT antes de cancelar a inscrição.'});gateway.selectReception(0);return res.json({accepted:true,code:'ODTP_UNSUBSCRIBE_REQUESTED',message:'Cancelamento de inscrição ODTP solicitado, sem TG 4000.'});}
     if (!currentGatewayStatus.connected)
       return res.status(409).json({ accepted: false, code: 'NOT_CONNECTED', message: 'Ligue primeiro ao master BrandMeister.' });
     if (currentGatewayStatus.pttArmed || currentGatewayStatus.disconnectingTalkgroup || currentGatewayStatus.talkgroupBurstActive)

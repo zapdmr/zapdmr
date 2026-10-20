@@ -10,6 +10,7 @@ export interface AppSettings {
   masterHost: string;
   masterPort: number;
   serverType: ServerType;
+  radioProtocol?: 'hbp' | 'odtp';
   staticTalkgroups: string;
   locationName: string;
   latitude: string;
