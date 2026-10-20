@@ -1,5 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
+$releaseVersion = [string](Get-Content -LiteralPath (Join-Path $projectRoot 'package.json') -Raw | ConvertFrom-Json).version
+if ($releaseVersion -notmatch '^\d+\.\d+\.\d+$') { throw 'A versão de release em package.json é inválida.' }
 $signingRoot = Join-Path $projectRoot '.android-signing'
 $configFile = Join-Path $signingRoot 'release.json'
 if (-not (Test-Path -LiteralPath $configFile)) { throw 'Release signing configuration is missing from .android-signing/release.json.' }
@@ -12,7 +14,7 @@ if (-not (Test-Path -LiteralPath $inputApk)) { throw 'Build assembleRelease befo
 $releaseDir = Join-Path $projectRoot 'release'
 New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
 $aligned = Join-Path $releaseDir 'ZapDMR-aligned.apk'
-$output = Join-Path $releaseDir 'ZapDMR-Android-1.3.0.apk'
+$output = Join-Path $releaseDir ("ZapDMR-Android-$releaseVersion.apk")
 & (Join-Path $tools 'zipalign.exe') -f -P 16 4 $inputApk $aligned
 if ($LASTEXITCODE -ne 0) { throw 'APK alignment failed.' }
 $env:ZAPDMR_RELEASE_STORE_PASSWORD = $signing.password
@@ -26,5 +28,5 @@ if ($LASTEXITCODE -ne 0) { throw 'APK signature validation failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'Signed APK alignment validation failed.' }
 Remove-Item -LiteralPath $aligned -Force
 $hash = (Get-FileHash -LiteralPath $output -Algorithm SHA256).Hash.ToLowerInvariant()
-Set-Content -LiteralPath (Join-Path $releaseDir 'ZapDMR-Android-1.3.0.sha256') -Value "$hash  ZapDMR-Android-1.3.0.apk" -Encoding ascii
+Set-Content -LiteralPath (Join-Path $releaseDir "ZapDMR-Android-$releaseVersion.sha256") -Value "$hash  ZapDMR-Android-$releaseVersion.apk" -Encoding ascii
 Write-Host "Signed release APK: $output"

@@ -796,7 +796,7 @@ async function init() {
   const androidAudioAvailable = Boolean(mobileAudio?.isAndroid?.());
   $('#mobileFirmwareSettings').hidden = !androidAudioAvailable;
   if (androidAudioAvailable) {
-    $('#aboutArchitecture').textContent = 'Android 1.3.0 · serviço HBP/UDP e áudio locais, com vocoder ARM64/ARMv7. Firmware incluído, instalado automaticamente ao abrir o aplicativo.';
+    $('#aboutArchitecture').textContent = 'Android 1.3.1 · serviço HBP/UDP e áudio locais, com vocoder ARM64/ARMv7. Firmware incluído, instalado automaticamente ao abrir o aplicativo.';
     try {
       await Promise.race([mobileAudio.initialize(handleMobileRadioEvent), new Promise((_, reject) => setTimeout(() => reject(new Error('O rádio ainda está a iniciar; o catálogo está disponível.')), 8000))]);
       mobileSecureConfig = await Promise.race([mobileAudio.loadRadioConfig(), new Promise((resolve) => setTimeout(() => resolve({}), 5000))]);

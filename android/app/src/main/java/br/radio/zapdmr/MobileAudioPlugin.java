@@ -120,8 +120,13 @@ public final class MobileAudioPlugin extends Plugin {
     }
     @PluginMethod public void openWhatsApp(PluginCall call){
         String phone=call.getString("phone","");
-        if(!phone.matches("\\+[1-9][0-9]{7,14}")){call.reject("Número WhatsApp inválido.");return;}
-        try{getContext().startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse("https://wa.me/"+phone.substring(1))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));call.resolve();}
+        if(phone==null||!phone.matches("\\+[1-9][0-9]{7,14}")){call.reject("Número WhatsApp inválido.");return;}
+        String text=call.getString("text","");
+        if(text==null)text="";
+        if(text.length()>2000){call.reject("Mensagem WhatsApp demasiado longa.");return;}
+        Uri.Builder target=new Uri.Builder().scheme("https").authority("wa.me").appendPath(phone.substring(1));
+        if(!text.isEmpty())target.appendQueryParameter("text",text);
+        try{getContext().startActivity(new Intent(Intent.ACTION_VIEW,target.build()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));call.resolve();}
         catch(Exception error){call.reject("Não foi possível abrir o WhatsApp ou navegador.");}
     }
     @PluginMethod public void radioControl(PluginCall call){

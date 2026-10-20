@@ -157,7 +157,7 @@ public final class AprsService extends Service {
                     if(input==10){
                         String text=new String(line.toByteArray(),StandardCharsets.ISO_8859_1).replaceFirst("\\r$","");line.reset();
                         if(!discard){
-                            if(!loggedIn&&text.startsWith("#")){String filter=config.optBoolean("map")&&hasPosition()?" filter r/"+config.optDouble("latitude")+"/"+config.optDouble("longitude")+"/"+config.optInt("rangeKm"):"";write("user "+config.getString("callsign")+" pass "+passcode+" vers ZapDMR 1.3.0"+filter);loggedIn=true;}
+                            if(!loggedIn&&text.startsWith("#")){String filter=config.optBoolean("map")&&hasPosition()?" filter r/"+config.optDouble("latitude")+"/"+config.optDouble("longitude")+"/"+config.optInt("rangeKm"):"";write("user "+config.getString("callsign")+" pass "+passcode+" vers ZapDMR 1.3.1"+filter);loggedIn=true;}
                             line(text);if(state.equals("connected")||state.equals("receive-only")){current.setSoTimeout(180000);retry=0;}
                         }
                         discard=false;

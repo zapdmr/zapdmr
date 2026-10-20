@@ -1,172 +1,134 @@
-# ZapDMR em Cloudflare Workers Free + D1
+# ZapDMR 1.3.1 em Cloudflare Workers Free + D1
 
-Este pacote prepara o portal `www.zapdmr.com.br` e a API da comunidade para Cloudflare Workers, usando D1 como banco. Os instaladores ficam em GitHub Releases. O servidor Node de `../server.mjs` continua sendo uma alternativa de hospedagem; ele não é o processo executado no Worker.
+O portal e a API da comunidade usam Workers + D1. Instaladores e fontes ficam em Releases do [repositório zapdmr/zapdmr](https://github.com/zapdmr/zapdmr). O servidor Node de ../server.mjs é uma alternativa; não é executado no Worker.
 
-**Estado em 19/10/2026:** o Worker está publicado em [www.zapdmr.com.br](https://www.zapdmr.com.br), com homepage HTTPS conferida no navegador. O banco D1 remoto e os três segredos de produção estão configurados. O domínio sem `www` redireciona com HTTP 308 para o endereço canônico em requisições GET/HEAD. A [pré-release v1.3.0](https://github.com/zapdmr/zapdmr/releases/tag/v1.3.0) está publicada com APK, EXE, fontes e SHA-256, e as URLs reais já estão preenchidas em `wrangler.jsonc`. A confirmação do número continua desativada por falta do provedor de códigos. O responsável é Rizandro Cesar da Silva, com contacto de privacidade em rizandro@gmail.com.
+## Estado em 20/10/2026
 
-Também foram conferidos no navegador `/healthz` (`ok: true`, versão `1.3.0`), `/v1/status` e a página de privacidade com os dados corretos. Após publicar as URLs, consultas HTTPS diretas fora do sandbox restrito confirmaram HTTP 200 em `/`, `/healthz`, `/v1/status`, `/privacidade/` e `/termos/`, com HSTS `max-age=31536000`. O estado da API informou cadastro ativo, confirmação desativada e downloads disponíveis nas duas plataformas com os hashes configurados. HEAD dos assets APK, EXE e fontes no GitHub retornou HTTP 200, com 7.336.566, 160.696.832 e 50.899.596 bytes, respectivamente. As falhas TLS anteriores ocorreram no ambiente restrito; a validação de certificado permaneceu ativa. O envio real do formulário e o fluxo de confirmação/chat entre dispositivos continuam sem validação remota completa.
+O frontend e a API 1.3.1 com OTP foram publicados. A migração remota de confirmação e fila concluiu 14 comandos, além da inicialização histórica do banco. A ponte Windows Baileys está aberta em http://127.0.0.1:4193, com QR aguardando o responsável vincular **+5543996741200**. O recebimento real de um código e uma validação positiva em produção ainda não foram demonstrados.
 
-### Implantação existente
+O portal exige confirmação antes de gerar o link de instalador. Os builds Android e Windows 1.3.1 existem localmente. Atualize as URLs de download apenas depois de publicar e conferir os respectivos assets. A configuração ainda pode apontar à Release v1.3.0 durante a preparação da atualização; a versão do backend não determina qual APK/EXE está em uma URL.
 
-| Item | Estado confirmado |
+Responsável: **Rizandro Cesar da Silva**. Contato/privacidade: **rizandro@gmail.com**. Consulte [o registro de 20/10/2026](../VERIFICACAO-2026-10-20.md), [autenticação](../AUTENTICACAO.md) e [OTP](../WHATSAPP-OTP.md). O [registro anterior](../VERIFICACAO-2026-10-19.md) preserva as verificações HTTPS e da Release realizadas em 19/10.
+
+| Recurso | Implantação existente |
 | --- | --- |
-| Worker | `zapdmr-community` |
-| Endereço alternativo | `https://zapdmr-community.rizandro.workers.dev` |
-| Domínios personalizados | `www.zapdmr.com.br` e `zapdmr.com.br` |
-| Versão publicada | `56d38b61-486a-4371-a028-4c7981198b47` |
-| D1 | `zapdmr-community`, binding `DB`, ID `6f272e21-de29-40a1-8bfd-801e00d2a95a` |
-| Esquema remoto | 17 comandos aplicados |
-| Zona DNS | `22bdf6d6691d98a8e3e67892ebe21434`, ativa no plano Free |
-| Servidores DNS | `dakota.ns.cloudflare.com` e `savanna.ns.cloudflare.com` |
-| Credencial de publicação | OAuth autorizado no Wrangler 4.151.2, protegido por cifragem e pelo keyring do Windows |
-| Segredos | `DATA_ENCRYPTION_KEY`, `DOWNLOAD_SECRET` e `ADMIN_PASSWORD` cadastrados |
+| Worker | zapdmr-community |
+| Origem canônica | https://www.zapdmr.com.br |
+| Origem alternativa | https://zapdmr-community.rizandro.workers.dev |
+| Domínio raiz | zapdmr.com.br; redireciona GET/HEAD para www |
+| D1 | zapdmr-community, binding DB |
+| ID D1 | 6f272e21-de29-40a1-8bfd-801e00d2a95a |
+| Zona | 22bdf6d6691d98a8e3e67892ebe21434, plano Free |
+| DNS | dakota.ns.cloudflare.com e savanna.ns.cloudflare.com |
+| Publicação | Wrangler 4.151.2 autorizado; OAuth cifrado com keyring Windows |
+| Segredos | Chave de dados, segredo de download, senha admin e token privado da ponte |
 
-Os registros de e-mail existentes, incluindo MX, SPF e DMARC, devem ser preservados em alterações de DNS. O backup dos segredos está protegido com DPAPI CurrentUser em `outputs/work/zapdmr-cloudflare-secrets.dpapi`; ele depende do usuário Windows que o criou e **nunca deve entrar em pacotes ou repositórios públicos**. Consulte [AUTENTICACAO.md](../AUTENTICACAO.md) para o fluxo de autenticação e tratamento de tokens.
+Preserve registros MX, SPF e DMARC nas alterações de DNS. Não recrie a zona, banco ou chaves para uma atualização de assets.
 
-## 1. O que pode ficar gratuito
+## Fluxo de confirmação 1.3.1
 
-| Componente | Serviço | Observação |
-| --- | --- | --- |
-| HTML, CSS, JavaScript e logótipo | Workers Static Assets | Arquivos pequenos do portal |
-| Cadastro, autenticação, diretório e ZapChat | Worker Free + D1 Free | Sujeitos às cotas abaixo |
-| APK, instalador Windows e código-fonte | GitHub Releases em repositório público | Downloads públicos, inclusive fora do portal |
-| Abrir a conversa do colega no WhatsApp | Link oficial `wa.me` | O operador envia pela aplicação oficial |
-| Confirmar o telefone por código | Provedor externo de SMS ou WhatsApp apropriado | Contratação e eventuais cobranças separadas |
+- Site e app enviam cadastro com requestVerification=true e abrem confirmação de seis dígitos.
+- Código criptográfico vinculado ao cadastro: dez minutos, reenvio após 60 segundos e até cinco tentativas.
+- Sem confirmação, downloadUrl permanece nulo e não há nova sessão para ZapChat.
+- Após verificar, a conta recebe whatsapp_verified=1, o código é consumido e a API retorna Bearer opaco de 30 dias e link de download de 15 minutos.
+- O download confere assinatura, prazo e confirmação no banco. Fontes GPL e Releases públicas do GitHub continuam acessíveis fora do formulário.
+- Confirmação de telefone não valida licença, indicativo ou DMR ID. A partilha de número é separada, opcional e revogável.
 
-Esta opção não usa R2. Mantenha Workers no plano Free e acompanhe o consumo. O domínio registrado continua tendo a sua renovação própria; hospedagem gratuita não elimina essa despesa.
+### Entrega direta
 
-O GitHub Free permite repositórios públicos. Uma Release aceita até 1.000 arquivos, cada um com menos de 2 GiB; a documentação não define limite de tamanho total da Release nem de banda. Isso comporta os instaladores atuais, mas continua sujeito às políticas do serviço. Use **Release assets**, sem colocar o EXE grande no histórico Git. [Planos do GitHub](https://docs.github.com/en/get-started/learning-about-github/githubs-plans), [limites de Releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases), [limites de arquivos no Git](https://docs.github.com/en/repositories/creating-and-managing-repositories/repository-limits).
+Configure WHATSAPP_API_URL e o secret WHATSAPP_API_TOKEN. O Worker faz POST HTTPS com Bearer e JSON {number,text}. A mensagem contém indicativo e código. O endpoint deve aceitar esse contrato e adaptar a API do provedor escolhido. Um template da API oficial Meta, por exemplo, pode exigir um adaptador.
 
-### Limites que precisam ser acompanhados
+O contrato legado OTP_DELIVERY_URL/OTP_DELIVERY_TOKEN recebe {phone,code,expiresInSeconds:600}. Nenhum token de provedor é público ou enviado ao app.
 
-| Recurso no plano Free | Limite consultado em 19/10/2026 |
+### Ponte local e confirmação reversa
+
+A configuração atual usa WHATSAPP_LOCAL_BRIDGE=1 e WHATSAPP_CONFIRM_NUMBER=+5543996741200. O secret WHATSAPP_WEBHOOK_TOKEN, com pelo menos 32 caracteres, autentica a ponte.
+
+A [ponte local](../whatsapp-bridge/README.md) usa Baileys 6.7.24, um cliente independente e sem vínculo oficial com a Meta. No primeiro vínculo, aguarda a ação no painel loopback 4193 e o responsável escaneia o QR em WhatsApp → Aparelhos conectados → Conectar aparelho. Uma sessão protegida já vinculada ao número correto pode ser retomada ao reiniciar. Sessão e token ficam cifrados por DPAPI CurrentUser. Não publique essa porta, não crie túnel e não coloque URL localhost em WHATSAPP_API_URL do Worker.
+
+Depois de pareada com o número correto, a ponte faz heartbeat e consulta a fila HTTPS de saída a cada cinco segundos. O Worker só escolhe mode=bridge com conexão recente. Payload de destino/texto fica cifrado no D1. A consulta entrega até cinco trabalhos com lease temporária e leaseId. ACKs precisam repetir a identidade da tentativa; IDs enviados ficam cifrados na ponte para reduzir duplicação. Falhas ou perda de conexão podem levar o desafio ao modo reverso.
+
+No modo reverso, o titular envia pelo próprio WhatsApp a mensagem pronta:
+ZapDMR CONFIRMAR <token-aleatorio-de-43-caracteres> <codigo-de-6-digitos>.
+
+A ponte recebe somente mensagens novas diretas nesse formato, extrai o remetente PN real e chama /v1/whatsapp/webhook com Bearer. O Worker compara telefone, nonce, código, prazo e tentativas antes de marcar reverse_confirmed_at. Site e app consultam /v1/auth/status para concluir a verificação. Abrir wa.me ou ver o código não comprova o número. Sem ponte receptora conectada, a mensagem reversa ainda não chega ao servidor.
+
+O computador precisa ficar ligado e online. O QR disponível é uma etapa de vinculação, não prova de entrega. Não existe código mestre de produção. OTP_MODE=development é recusado pelo Worker; a homologação visível só existe no Node local com banco isolado e whatsapp_verified=false.
+
+## Variáveis e segredos
+
+| Configuração pública | Uso |
 | --- | --- |
-| Invocações do Worker | 100.000 por dia por conta |
-| CPU do Worker | 10 ms por invocação |
-| Arquivo individual em Static Assets | 25 MiB |
-| Arquivos estáticos por versão do Worker | 20.000 |
-| D1: linhas lidas | 5 milhões por dia |
-| D1: linhas gravadas | 100.000 por dia |
-| D1: tamanho deste banco no Free | 500 MB |
-| D1: armazenamento total por conta | 5 GB, até 10 bancos |
-| D1: recuperação Time Travel no Free | 7 dias |
+| PUBLIC_ORIGIN | https://www.zapdmr.com.br |
+| OWNER_NAME | Rizandro Cesar da Silva |
+| PRIVACY_EMAIL | rizandro@gmail.com |
+| DOWNLOAD_ANDROID_URL / DOWNLOAD_WINDOWS_URL | URLs HTTPS dos assets realmente publicados |
+| DOWNLOAD_ANDROID_BYTES / DOWNLOAD_WINDOWS_BYTES | Tamanho exato do instalador da mesma URL |
+| DOWNLOAD_ANDROID_SHA256 / DOWNLOAD_WINDOWS_SHA256 | SHA-256 do mesmo instalador |
+| SOURCE_URL | Fontes correspondentes, públicas |
+| WHATSAPP_API_URL | Adaptador HTTPS, quando usado |
+| OTP_DELIVERY_URL | Adaptador legado, quando usado |
+| WHATSAPP_CONFIRM_NUMBER | Número receptor oficial |
+| WHATSAPP_LOCAL_BRIDGE | 1 para fila local com heartbeat recente |
 
-As requisições atendidas diretamente pelos arquivos estáticos não consomem invocações do Worker. API e páginas geradas pelo Worker consomem; configurar `run_worker_first` para todas as URLs também faz as visitas a arquivos passarem pelo Worker. Por isso, não coloque os instaladores no diretório de assets: o EXE e o ZIP de fontes ultrapassam 25 MiB. [Limites de Workers](https://developers.cloudflare.com/workers/platform/limits/), [cobrança e roteamento de assets](https://developers.cloudflare.com/workers/static-assets/billing-and-limitations/).
+DATA_ENCRYPTION_KEY e DOWNLOAD_SECRET são secrets distintos, cada um com 64 caracteres hexadecimais. ADMIN_PASSWORD é uma senha privada forte. O helper configure-secrets.mjs reutiliza seu backup cifrado; não gere novas chaves em uma simples republicação. Perder ou trocar a chave de dados sem migração impede ler dados existentes.
 
-As cotas diárias do D1 reiniciam às 00:00 UTC. Ao ultrapassar leitura ou escrita, as consultas deixam de funcionar até o reinício ou mudança de plano; atingir o armazenamento também impede novas operações que precisem de espaço. Índices e varreduras influenciam o consumo: uma resposta com poucas linhas pode ter lido muitas. [Preços e métricas do D1](https://developers.cloudflare.com/d1/platform/pricing/), [limites do D1](https://developers.cloudflare.com/d1/platform/limits/).
+WHATSAPP_API_TOKEN, OTP_DELIVERY_TOKEN e WHATSAPP_WEBHOOK_TOKEN são secrets, conforme os modos usados. configure-whatsapp-bridge.mjs prepara o token privado compartilhado e a configuração DPAPI da ponte. Nenhum valor secreto deve entrar no wrangler.jsonc, frontend, commit, argumento de comando ou relatório público.
 
-**ZapChat exige atenção:** como exemplo de dimensionamento, uma consulta a cada 25 segundos gera cerca de 3.456 requisições por usuário conectado durante 24 horas. Só 29 usuários nesse ritmo já ultrapassariam 100.000 requisições, antes de cadastros, autenticação e outras chamadas. O cálculo é ilustrativo: reconexões, mensagens e a implementação de polling mudam o consumo. Suspenda consultas quando a tela não estiver ativa, aplique espera progressiva em erros e acompanhe requisições e linhas lidas no painel. A faixa gratuita serve para iniciar; não é uma promessa de escala ilimitada sem custo.
+Os backups DPAPI dependem do usuário Windows que os criou. Eles não são portáteis isoladamente. .env, .dev.vars, .wrangler, bancos, dados de usuários, sessões da ponte e chaves de assinatura devem permanecer fora dos pacotes públicos.
 
-## 2. Instaladores publicados no GitHub
+## Banco e atualização
 
-1. Use o repositório público [zapdmr/zapdmr](https://github.com/zapdmr/zapdmr), já criado na conta autorizada.
-2. A pré-release pública `v1.3.0` contém quatro assets: APK, instalador Windows, ZIP de código-fonte correspondente e SHA-256. Mantenha GPL e os avisos de componentes no pacote de fontes.
-3. O commit/etiqueta `65d900b4e0e02a65dea17fcc18b41bf54497ca76` contém 128 arquivos de código e documentação revisados para publicação, incluindo a explicação de autenticação.
-4. As variáveis `DOWNLOAD_ANDROID_URL`, `DOWNLOAD_WINDOWS_URL` e `SOURCE_URL` já apontam para os assets publicados. Tamanho e SHA-256 dos instaladores também estão configurados. Em atualizações futuras, publique uma versão específica e atualize essas variáveis antes de republicar o Worker.
+A implantação existente já tem o banco e as migrações. Para atualizar código e assets, use esta pasta e a conta autorizada:
 
-URLs configuradas dos assets publicados:
+```powershell
+npx wrangler whoami
+npx wrangler deploy
+```
+
+Somente em implantação nova, crie o banco, preencha seu ID no binding DB e aplique schema.sql revisado. Em banco existente, faça backup e aplique apenas a migração incremental necessária. Reexecutar uma sequência ALTER TABLE já aplicada pode falhar; schema.sql não substitui um histórico de migrações.
+
+A migração 1.3.1 adiciona estados de confirmação, modo e nonce, desafio cifrado, fila cifrada de WhatsApp e estado de conexão da ponte. A criação inicial do banco em 19/10 teve 17 comandos; a atualização OTP registrada em 20/10 teve 14. Esses números são resultados de execuções específicas, não instruções para repetir ambas as operações.
+
+Wrangler deploy publica recursos remotos. A validação de certificado HTTPS deve permanecer ativa. A API privada não recebe cache público. A limpeza horária remove sessões/códigos expirados e registros pendentes antigos conforme o código.
+
+## Releases e distribuição
+
+Publique APK, EXE, ZIP das fontes correspondentes e SHA-256 em uma Release específica. Não use uma URL presumida antes de o asset existir. Depois atualize URL/tamanho/hash no Worker e republique. O instalador Windows e o ZIP de fontes são grandes demais para o limite individual de assets estáticos; use assets da Release, sem colocá-los no histórico Git.
+
+Os arquivos locais 1.3.1 preparados nesta revisão são:
 
 ```text
-https://github.com/zapdmr/zapdmr/releases/download/v1.3.0/ZapDMR-Android-1.3.0.apk
-https://github.com/zapdmr/zapdmr/releases/download/v1.3.0/ZapDMR-Setup.exe
-https://github.com/zapdmr/zapdmr/releases/download/v1.3.0/ZapDMR-Android-1.3.0-source.zip
+release/ZapDMR-Android-1.3.1.apk
+release/ZapDMR-Windows-1.3.1.exe
 ```
 
-**O formulário obrigatório vale para o fluxo do portal.** Os assets de uma Release pública podem ser baixados diretamente, compartilhados ou encontrados no GitHub sem cadastro. O token temporário do portal não transforma esses arquivos em privados. Esta arquitetura não garante cadastro de toda pessoa que receber o aplicativo. O código-fonte GPL permanece acessível sem formulário. [Como criar e publicar uma Release](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository).
+O repositório e a Release v1.3.0 já estavam públicos em 19/10. Isso não comprova por si só que uma nova Release 1.3.1 foi publicada. O mantenedor deve conferir a Release efetiva e as URLs atuais antes de anunciar a atualização.
 
-Nunca envie banco de cadastros, telefones, conversas, exports, arquivos `.env`, `.dev.vars`, chaves de assinatura Android, arquivos DPAPI nem senhas para GitHub, Releases ou `public/`.
+## Cotas gratuitas
 
-## 3. Configuração do Worker e D1
+Limites abaixo foram consultados na documentação em **19/10/2026**; acompanhe o painel e a documentação atual antes de ampliar o uso.
 
-**A instalação, o login e a criação/inicialização do banco remoto já foram concluídos nesta implantação.** Não execute novamente a criação do banco ou o esquema apenas para atualizar assets e URLs. Os comandos abaixo documentam o preparo de uma implantação nova. Use esta pasta, `outputs/site/cloudflare`, e confira a conta antes de qualquer alteração remota.
-
-```powershell
-npm install
-npx wrangler login
-npx wrangler whoami
-npx wrangler d1 create zapdmr-community
-```
-
-Em uma implantação nova, copie o `database_id` retornado para `wrangler.jsonc`, mantendo o binding **`DB`** e o nome de banco escolhido. A configuração atual já contém o ID remoto indicado na tabela acima. A API usa `env.DB`; um arquivo SQLite local não substitui esse binding. [Introdução ao D1](https://developers.cloudflare.com/d1/get-started/).
-
-Somente para um banco novo, depois de preencher a configuração e revisar `schema.sql`, inicialize o banco remoto:
-
-```powershell
-npx wrangler d1 execute DB --remote --file=schema.sql
-```
-
-`--remote` altera o banco da conta Cloudflare. O esquema atual já foi aplicado remotamente com 17 comandos concluídos. Para mudanças posteriores, faça backup e revise o SQL antes de aplicar; este arquivo não é um sistema automático de migrações versionadas. [Comandos D1](https://developers.cloudflare.com/d1/wrangler-commands/).
-
-### Variáveis públicas de configuração
-
-Preencha em `vars` de `wrangler.jsonc` ou no painel do Worker:
-
-| Nome | Valor necessário |
+| Recurso Free | Limite consultado |
 | --- | --- |
-| `PUBLIC_ORIGIN` | `https://www.zapdmr.com.br` |
-| `OWNER_NAME` | `Rizandro Cesar da Silva` |
-| `PRIVACY_EMAIL` | `rizandro@gmail.com` |
-| `DOWNLOAD_ANDROID_URL` | URL HTTPS do APK na Release publicada |
-| `DOWNLOAD_WINDOWS_URL` | URL HTTPS do EXE na Release publicada |
-| `SOURCE_URL` | URL HTTPS do ZIP de fontes correspondente |
-| `OTP_DELIVERY_URL` | URL HTTPS do adaptador privado de entrega, quando existir |
+| Invocações Worker | 100.000 por dia por conta |
+| CPU Worker | 10 ms por invocação |
+| Asset individual | 25 MiB |
+| Assets estáticos por versão | 20.000 |
+| D1 linhas lidas | 5 milhões por dia |
+| D1 linhas gravadas | 100.000 por dia |
+| D1 por banco | 500 MB |
+| D1 armazenamento por conta | 5 GB, até 10 bancos |
+| D1 Time Travel | 7 dias |
 
-Não invente responsável, e-mail nem arquivos publicados. O `../public` contém somente os assets do portal. O banco D1 armazena os registros privados; as URLs de download não carregam telefones ou indicativos.
+Assets servidos diretamente não consomem invocações do Worker; APIs e páginas geradas consomem. A ponte em polling de cinco segundos pode gerar cerca de 17.280 consultas por dia, além das demais chamadas e escritas de heartbeat. ZapChat também usa polling: uma consulta a cada 25 segundos equivale a cerca de 3.456 requisições diárias por usuário sempre conectado. A faixa gratuita não representa escala ilimitada.
 
-### Segredos de produção
+As cotas D1 reiniciam às 00:00 UTC. Linhas lidas/gravadas e armazenamento devem ser monitorados. O domínio continua sujeito à renovação própria.
 
-Os três segredos já foram gerados, guardados com DPAPI CurrentUser e enviados à produção pelo helper `configure-secrets.mjs`. As chaves AES e HMAC têm 64 caracteres hexadecimais cada e são diferentes; a senha administrativa é aleatória e forte. Não gere chaves novas para uma simples republicação. O helper reutiliza o backup protegido para evitar rotação acidental.
+Referências: [Workers](https://developers.cloudflare.com/workers/platform/limits/), [Static Assets](https://developers.cloudflare.com/workers/static-assets/billing-and-limitations/), [D1](https://developers.cloudflare.com/d1/platform/limits/), [preços D1](https://developers.cloudflare.com/d1/platform/pricing/), [Releases GitHub](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases).
 
-Em outra implantação, os valores também podem ser cadastrados interativamente, sem escrevê-los no código ou no arquivo de configuração:
+## Próxima observação necessária
 
-```powershell
-npx wrangler secret put DATA_ENCRYPTION_KEY
-npx wrangler secret put DOWNLOAD_SECRET
-npx wrangler secret put ADMIN_PASSWORD
-```
+O responsável precisa escanear o QR. Em seguida, observar uma entrega real, validar o código no site e no app e conferir o download e uma conversa entre instalações. Não há validação positiva de OTP em produção registrada nesta revisão. Os 38 checks isolados de 19/10 pertencem à implementação anterior e não validam a nova fila/ponte.
 
-As duas primeiras chaves devem ser aleatórias, diferentes e ter 64 caracteres hexadecimais cada. Use uma senha administrativa forte com pelo menos 16 caracteres. Guarde cópias em um gerenciador de senhas: trocar ou perder a chave de cifragem sem migrar os dados pode tornar telefones e mensagens existentes ilegíveis.
-
-Quando houver um adaptador de códigos contratado/configurado:
-
-```powershell
-npx wrangler secret put OTP_DELIVERY_TOKEN
-```
-
-`wrangler secret put` pode criar uma versão e publicá-la imediatamente. Use-o apenas no Worker e na conta preparados para produção. `.dev.vars` é somente para desenvolvimento e deve ficar fora do Git, assim como `.env` e `.wrangler/`. [Segredos do Workers](https://developers.cloudflare.com/workers/configuration/secrets/).
-
-## 4. Ativar confirmação de número e comunidade
-
-O Worker precisa de `OTP_DELIVERY_URL` e `OTP_DELIVERY_TOKEN` válidos. O adaptador recebe POST JSON com `phone`, `code` e `expiresInSeconds`, autenticado com Bearer, e entrega o código por um canal apropriado. O custo e as regras de envio pertencem ao provedor escolhido. Cloudflare Free e GitHub não fornecem SMS ou mensagens de autenticação no WhatsApp.
-
-Sem esse provedor, o cadastro e os downloads podem funcionar, mas **novos usuários não conseguem confirmar o número, entrar no diretório ou iniciar o ZapChat**. Não substitua confirmação por um código público, por aprovação automática nem pelo sucesso de um link `wa.me`. A presença das variáveis indica configuração; a entrega real precisa ser confirmada antes de anunciar que o serviço está operacional.
-
-O botão “Chamar no Zap” usa Click to Chat para abrir a conversa na aplicação oficial ou no WhatsApp Web. Ele não envia uma mensagem pela API em nome do ZapDMR e não incorpora conversas pessoais do WhatsApp ao app. Essa abertura de link não utiliza cobrança de envio de mensagens de uma API do ZapDMR. ZapChat é o chat próprio, e seu consumo fica nas cotas Worker/D1. [Click to Chat oficial](https://faq.whatsapp.com/5913398998672934/?locale=pt_BR).
-
-Telefones e conteúdo do ZapChat são cifrados pela aplicação antes de persistir no banco. Os administradores com acesso às chaves podem decifrá-los; isto **não é cifragem ponta a ponta**. A partilha do telefone continua opcional, separada do cadastro, e a confirmação do telefone não comprova licença ou propriedade do indicativo. Mantenha exclusão de conta, revogação da partilha, limites de abuso e limpeza de cadastros antigos ativos na implantação.
-
-## 5. Domínio publicado e futuras atualizações
-
-A zona está ativa no plano Free com os servidores DNS indicados acima. Os dois domínios personalizados já estão associados ao Worker; a homepage de `www.zapdmr.com.br` foi conferida por HTTPS. O procedimento abaixo fica como referência de implantação/manutenção, sem necessidade de recriar os recursos existentes.
-
-1. No Cloudflare, confirme que a zona `zapdmr.com.br` está **Active** na conta escolhida. Se ainda não estiver, conclua no Registro.br a configuração dos servidores DNS fornecidos pelo Cloudflare. Preserve registros de e-mail existentes.
-2. Preencha banco, variáveis e segredos. Publique o Worker com os assets:
-
-   ```powershell
-   npx wrangler deploy
-   ```
-
-3. Em **Workers & Pages → Worker → Settings → Domains & Routes → Add → Custom Domain**, acrescente `www.zapdmr.com.br`. O Cloudflare configura o DNS e o certificado do domínio personalizado. Um CNAME existente com o mesmo nome deve ser revisado antes: ele pode impedir a associação.
-4. Decida também o destino de `zapdmr.com.br` sem `www`: use um domínio personalizado adicional compatível com o Worker ou um redirecionamento para o endereço canônico. Registrar somente `www` não configura automaticamente todos os outros nomes.
-5. Aguarde o domínio/certificado ficarem ativos e confira homepage, termos, privacidade, `/v1/status` e os arquivos das duas plataformas. Confirme que o app usa a origem HTTPS definitiva. A API privada não deve ser colocada em cache público.
-
-A verificação HTTPS confirma as páginas públicas, saúde, estado da API e disponibilidade dos assets no momento observado. A Release está publicada e suas URLs ativas no Worker. Valide o envio do formulário, a entrega de códigos e o uso em dispositivos reais antes de anunciar a comunidade operacional. [Domínios personalizados do Workers](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/).
-
-## 6. Ativação da comunidade e validação em dispositivos
-
-- **Único bloqueio funcional restante para novas contas da comunidade:** definir o provedor/adaptador de códigos, configurar suas credenciais e validar a entrega real. Sem essa etapa, novos usuários não conseguem confirmar o telefone, acessar o diretório ou iniciar ZapChat.
-- O envio remoto do formulário e o redirecionamento assinado do portal ainda precisam ser validados como fluxo completo. A API já informa os downloads disponíveis e os assets públicos APK/EXE/fontes responderam HTTP 200 a HEAD.
-- Confirmar a origem HTTPS definitiva no app e validar o fluxo entre duas instalações reais após ativar o provedor.
-- O Worker pode levar até 25 segundos para devolver uma mensagem nova numa consulta pendente. O app 1.3.0 ainda não consome o canal separado `receipts`; leituras aparecem ao sincronizar novamente o histórico.
-
-As verificações funcionais isoladas tiveram 38 resultados aprovados; não substituem a validação de entrega OTP e uso em dispositivos reais. Nenhum código ou mensagem foi enviado a uma pessoa real durante essas verificações. As cotas e condições devem ser acompanhadas após a publicação.
+O Bearer da comunidade tem 30 dias e é separado do login HBP. ZapChat é próprio e cifrado no servidor, sem cifragem ponta a ponta; o botão Chamar no Zap abre o WhatsApp oficial. Polling de mensagens pode levar até 25 segundos, e recibos ao vivo exigem suporte do cliente ao canal receiptAfter/receipts.

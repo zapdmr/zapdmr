@@ -10,13 +10,17 @@ const root=path.dirname(fileURLToPath(import.meta.url)),prod=process.env.NODE_EN
 const dataDir=path.resolve(process.env.DATA_DIR||path.join(root,'data')),downloadDir=path.resolve(process.env.DOWNLOAD_DIR||path.join(root,'private/downloads'));
 fs.mkdirSync(dataDir,{recursive:true,mode:0o700});fs.mkdirSync(downloadDir,{recursive:true,mode:0o700});
 const origin=process.env.PUBLIC_ORIGIN||'http://localhost:3000';
+const loopback=value=>['localhost','127.0.0.1','::1','[::1]','::ffff:127.0.0.1'].includes(String(value||'').toLowerCase());
+const developmentOtp=process.env.OTP_MODE==='development';
+if(developmentOtp&&(prod||!loopback(new URL(origin).hostname)||!loopback(process.env.HOST||'127.0.0.1')))throw new Error('OTP_MODE=development exige ambiente não produtivo com origem e escuta em localhost.');
 const pageOptions={origin,owner:process.env.OWNER_NAME,privacyEmail:process.env.PRIVACY_EMAIL,production:prod,assetsVersion:crypto.createHash('sha256').update(fs.readFileSync(path.join(root,'public/site.js'))).update(fs.readFileSync(path.join(root,'public/site.css'))).digest('hex').slice(0,12)};
 if(prod&&(!/^https:\/\/[a-z0-9.-]+$/i.test(origin)||!process.env.OWNER_NAME||!process.env.PRIVACY_EMAIL))throw new Error('Configure PUBLIC_ORIGIN HTTPS, OWNER_NAME e PRIVACY_EMAIL antes de publicar.');
 function secret(name){let value=process.env[name];if(!value&&!prod){const file=path.join(dataDir,name.toLowerCase()+'.key');if(!fs.existsSync(file))fs.writeFileSync(file,crypto.randomBytes(32).toString('hex'),{mode:0o600});value=fs.readFileSync(file,'utf8').trim();}if(!/^[a-f\d]{64}$/i.test(value||''))throw new Error(`Configure ${name} com 64 caracteres hexadecimais.`);return Buffer.from(value,'hex');}
 const key=secret('DATA_ENCRYPTION_KEY'),downloadKey=secret('DOWNLOAD_SECRET');
 if(prod&&crypto.timingSafeEqual(key,downloadKey))throw new Error('DATA_ENCRYPTION_KEY e DOWNLOAD_SECRET devem ser segredos diferentes.');
 if(prod&&(process.env.ADMIN_PASSWORD||'').length<16)throw new Error('Configure ADMIN_PASSWORD com pelo menos 16 caracteres.');
-const db=new DatabaseSync(path.join(dataDir,'zapdmr.sqlite'));db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
+// Visible development codes always use their own database, never the production accounts.
+const db=new DatabaseSync(path.join(dataDir,developmentOtp?'zapdmr-development.sqlite':'zapdmr.sqlite'));db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
 db.exec(`CREATE TABLE IF NOT EXISTS registrations(id TEXT PRIMARY KEY,callsign TEXT NOT NULL,dmr_id TEXT NOT NULL,phone_cipher TEXT NOT NULL,phone_hash TEXT NOT NULL,share_phone INTEGER NOT NULL,platform TEXT NOT NULL,created_at INTEGER NOT NULL,notice_version TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,callsign TEXT UNIQUE NOT NULL,dmr_id TEXT UNIQUE NOT NULL,phone_cipher TEXT NOT NULL,phone_hash TEXT NOT NULL,share_phone INTEGER NOT NULL,created_at INTEGER NOT NULL,verified_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,expires_at INTEGER NOT NULL);
@@ -27,6 +31,11 @@ CREATE INDEX IF NOT EXISTS messages_receipts ON messages(sender,recipient,read_a
 CREATE INDEX IF NOT EXISTS messages_at_cursor ON messages(at,id);
 CREATE INDEX IF NOT EXISTS messages_read_cursor ON messages(read_at,id);
 CREATE TABLE IF NOT EXISTS blocks(owner TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,peer TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,PRIMARY KEY(owner,peer));`);
+for(const [table,columns]of Object.entries({registrations:{whatsapp_verified:'INTEGER NOT NULL DEFAULT 0',verified_at:'INTEGER'},users:{whatsapp_verified:'INTEGER NOT NULL DEFAULT 1',verification_method:"TEXT NOT NULL DEFAULT 'direct'"},codes:{requested_at:'INTEGER NOT NULL DEFAULT 0',mode:"TEXT NOT NULL DEFAULT 'direct'",challenge_hash:'TEXT',reverse_confirmed_at:'INTEGER'}})){
+  const present=new Set(db.prepare(`PRAGMA table_info(${table})`).all().map(column=>column.name));
+  for(const [name,type]of Object.entries(columns))if(!present.has(name))db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+}
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS codes_challenge ON codes(challenge_hash) WHERE challenge_hash IS NOT NULL;');
 const hash=value=>crypto.createHmac('sha256',key).update(value).digest('hex');
 const seal=value=>{const iv=crypto.randomBytes(12),cipher=crypto.createCipheriv('aes-256-gcm',key,iv);const encrypted=Buffer.concat([cipher.update(value,'utf8'),cipher.final()]);return Buffer.concat([iv,encrypted,cipher.getAuthTag()]).toString('base64');};
 function unseal(value){const data=Buffer.from(value,'base64'),cipher=crypto.createDecipheriv('aes-256-gcm',key,data.subarray(0,12));cipher.setAuthTag(data.subarray(-16));return Buffer.concat([cipher.update(data.subarray(12,-16)),cipher.final()]).toString('utf8');}
@@ -46,11 +55,11 @@ async function body(req){
   return value;
 }
 function user(req){const token=String(req.headers.authorization||'').replace(/^Bearer /,'');if(!/^[A-Za-z0-9_-]{43}$/.test(token))throw Object.assign(new Error('Entre na comunidade com o código recebido no seu número.'),{status:401});const row=db.prepare('SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.hash=? AND s.expires_at>?').get(hash(token),Date.now());if(!row)throw Object.assign(new Error('Sessão expirada. Confirme novamente o número.'),{status:401});return row;}
-const publicUser=(row,own=false)=>({id:row.id,callsign:row.callsign,dmrId:row.dmr_id,verified:true,sharePhone:Boolean(row.share_phone),...(own||row.share_phone?{whatsapp:unseal(row.phone_cipher)}:{})});
+const publicUser=(row,own=false)=>({id:row.id,callsign:row.callsign,dmrId:row.dmr_id,verified:Boolean(row.whatsapp_verified),whatsappVerified:Boolean(row.whatsapp_verified),whatsapp_verified:Boolean(row.whatsapp_verified),verificationMethod:row.verification_method,sharePhone:Boolean(row.share_phone),...(own||row.share_phone?{whatsapp:unseal(row.phone_cipher)}:{})});
 function installer(platform){return {android:'ZapDMR-Android.apk',windows:'ZapDMR-Windows.exe'}[platform];}
 function downloadToken(id,platform){const value=Buffer.from(JSON.stringify({id,platform,expires:Date.now()+900000})).toString('base64url'),signature=crypto.createHmac('sha256',downloadKey).update(value).digest('base64url');return value+'.'+signature;}
 function streamFile(file,res){const stream=fs.createReadStream(file);stream.on('error',()=>res.destroy());res.on('close',()=>stream.destroy());stream.pipe(res);}
-function download(req,res,token){const [value,signature]=token.split('.');if(!value||!signature||!safeEqual(signature,crypto.createHmac('sha256',downloadKey).update(value).digest('base64url')))return json(res,403,{message:'Link de download inválido.'});let data;try{data=JSON.parse(Buffer.from(value,'base64url').toString());}catch{return json(res,403,{message:'Link inválido.'});}if(data.expires<Date.now()||!db.prepare('SELECT id FROM registrations WHERE id=?').get(data.id))return json(res,403,{message:'O link expirou. Solicite novamente o instalador.'});const name=installer(data.platform);if(!name)return json(res,404,{message:'Plataforma inválida.'});const file=path.join(downloadDir,name);if(!fs.existsSync(file))return json(res,404,{message:'Instalador ainda não publicado.'});res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="${name}"`,'Content-Length':fs.statSync(file).size,'Cache-Control':'private, no-store'});streamFile(file,res);}
+function download(req,res,token){const [value,signature]=token.split('.');if(!value||!signature||!safeEqual(signature,crypto.createHmac('sha256',downloadKey).update(value).digest('base64url')))return json(res,403,{message:'Link de download inválido.'});let data;try{data=JSON.parse(Buffer.from(value,'base64url').toString());}catch{return json(res,403,{message:'Link inválido.'});}if(data.expires<Date.now()||!db.prepare('SELECT id FROM registrations WHERE id=? AND verified_at IS NOT NULL').get(data.id))return json(res,403,{message:'O link expirou ou o número ainda não foi confirmado. Confirme novamente.'});const name=installer(data.platform);if(!name)return json(res,404,{message:'Plataforma inválida.'});const file=path.join(downloadDir,name);if(!fs.existsSync(file))return json(res,404,{message:'Instalador ainda não publicado.'});res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':`attachment; filename="${name}"`,'Content-Length':fs.statSync(file).size,'Cache-Control':'private, no-store'});streamFile(file,res);}
 function rowMessage(row,own){return {id:row.id,from:row.sender,to:row.recipient,text:unseal(row.body_cipher),at:row.at,readAt:row.read_at,direction:row.sender===own?'out':'in',state:row.read_at?'read':'sent'};}
 function messages(own,peer,after=0){return db.prepare('SELECT * FROM messages WHERE ((sender=? AND recipient=?) OR (sender=? AND recipient=?)) AND at>=? ORDER BY at,id LIMIT 100').all(own,peer,peer,own,after).map(row=>rowMessage(row,own));}
 function cursor(value){const number=Number(value);return Number.isSafeInteger(number)&&number>=0?number:0;}
@@ -70,27 +79,91 @@ function markRead(own,peer){
   }catch(error){db.exec('ROLLBACK');throw error;}
 }
 function wake(id){for(const item of waiters.get(id)||[])item();waiters.delete(id);}
+function deliveryConfiguration(){
+  const whatsappUrl=String(process.env.WHATSAPP_API_URL||''),whatsappToken=String(process.env.WHATSAPP_API_TOKEN||'');
+  const legacyUrl=String(process.env.OTP_DELIVERY_URL||''),legacyToken=String(process.env.OTP_DELIVERY_TOKEN||'');
+  let reverseNumber='';try{reverseNumber=phone(process.env.WHATSAPP_CONFIRM_NUMBER);}catch{}
+  return {direct:/^https:\/\//i.test(whatsappUrl)&&Boolean(whatsappToken)?{url:whatsappUrl,token:whatsappToken,whatsapp:true}:!whatsappUrl&&!whatsappToken&&/^https:\/\//i.test(legacyUrl)&&Boolean(legacyToken)?{url:legacyUrl,token:legacyToken,whatsapp:false}:null,reverse:reverseNumber&&(process.env.WHATSAPP_WEBHOOK_TOKEN||'').length>=32?reverseNumber:null};
+}
+function challengeResult(row,challengeToken,code){
+  const mode=row.mode||'unavailable',expiresInSeconds=Math.max(0,Math.ceil((row.expires_at-Date.now())/1000)),retryAfterSeconds=Math.max(0,Math.ceil((row.requested_at+60000-Date.now())/1000));
+  const result={mode,sent:mode==='direct',expiresInSeconds,retryAfterSeconds,message:mode==='direct'?'Código enviado. Confira as mensagens no seu número de WhatsApp.':mode==='reverse'?'Abra o WhatsApp e envie a mensagem pronta para confirmar que este número é seu. Depois volte ao ZapDMR.':mode==='development'?'Homologação local: este código não confirma um número real de WhatsApp.':'O envio de códigos ainda precisa ser configurado pelo responsável. Nenhum número foi confirmado.'};
+  if(challengeToken)result.challengeToken=challengeToken;
+  if(mode==='reverse'&&challengeToken&&code){result.displayCode=code;result.whatsappUrl=`https://wa.me/${deliveryConfiguration().reverse.slice(1)}?text=${encodeURIComponent(`ZapDMR CONFIRMAR ${challengeToken} ${code}`)}`;}
+  if(mode==='development'&&code)result.displayCode=code;
+  return result;
+}
+function registrationIdentity(row){
+  const prior=db.prepare('SELECT * FROM users WHERE callsign=? OR dmr_id=?').all(row.callsign,row.dmr_id);
+  if(prior.some(user=>user.phone_hash!==row.phone_hash||user.callsign!==row.callsign||user.dmr_id!==row.dmr_id))throw Object.assign(new Error('Este indicativo ou DMR ID já possui uma conta. Use o número existente ou contacte o responsável.'),{status:409});
+  return prior[0];
+}
+async function issueChallenge(req,row){
+  registrationIdentity(row);
+  const now=Date.now(),prior=db.prepare('SELECT * FROM codes WHERE registration_id=?').get(row.id),phoneLimitKey='otp-phone:'+row.phone_hash,previousDelivery=limits.get(phoneLimitKey);
+  if((prior&&prior.requested_at+60000>now)||(previousDelivery&&previousDelivery.until>now))throw Object.assign(new Error('Aguarde 60 segundos antes de pedir outro código para este número.'),{status:429});
+  limits.set(phoneLimitKey,{n:1,until:now+60000});
+  const configuration=deliveryConfiguration(),code=String(crypto.randomInt(100000,1000000)),challengeToken=crypto.randomBytes(32).toString('base64url');
+  db.prepare("INSERT INTO codes(registration_id,hash,expires_at,attempts,requested_at,mode,challenge_hash,reverse_confirmed_at) VALUES(?,?,?,0,?,'pending',?,NULL) ON CONFLICT(registration_id) DO UPDATE SET hash=excluded.hash,expires_at=excluded.expires_at,attempts=0,requested_at=excluded.requested_at,mode=excluded.mode,challenge_hash=excluded.challenge_hash,reverse_confirmed_at=NULL").run(row.id,hash(row.id+':'+code),now+600000,now,hash(challengeToken));
+  let mode='unavailable';
+  if(configuration.direct){
+    const direct=configuration.direct,number=unseal(row.phone_cipher),text=`*ZapDMR:* Olá ${row.callsign}, seu código de confirmação de 6 dígitos é: *${code}*. Forte 73!`;
+    try{const sent=await fetch(direct.url,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+direct.token},body:JSON.stringify(direct.whatsapp?{number,text}:{phone:number,code,expiresInSeconds:600}),signal:AbortSignal.timeout(12000)});if(sent.ok)mode='direct';}catch{}
+  }
+  if(mode!=='direct'&&configuration.reverse)mode='reverse';
+  if(mode==='unavailable'&&developmentOtp&&loopback(req.socket.remoteAddress))mode='development';
+  db.prepare('UPDATE codes SET mode=? WHERE registration_id=? AND challenge_hash=?').run(mode,row.id,hash(challengeToken));
+  return challengeResult({...db.prepare('SELECT * FROM codes WHERE registration_id=?').get(row.id),mode},challengeToken,code);
+}
+function challengeStatus(raw){
+  const row=db.prepare('SELECT * FROM codes WHERE registration_id=?').get(String(raw.registrationId||'')),challengeToken=String(raw.challengeToken||'');
+  if(!row||!/^[A-Za-z0-9_-]{43}$/.test(challengeToken)||!row.challenge_hash||!safeEqual(row.challenge_hash,hash(challengeToken)))throw Object.assign(new Error('Confirmação não encontrada. Solicite outro código.'),{status:404});
+  const expired=row.expires_at<=Date.now()||row.attempts>=5;
+  return {status:expired?'expired':row.mode==='reverse'&&row.reverse_confirmed_at?'confirmed':'pending',...challengeResult(row)};
+}
+async function receiveWhatsApp(req,res){
+  const secret=String(process.env.WHATSAPP_WEBHOOK_TOKEN||''),provided=String(req.headers.authorization||'');
+  if(secret.length<32||!safeEqual(provided,'Bearer '+secret))throw Object.assign(new Error('Autenticação do webhook necessária.'),{status:401});
+  rate(req,'whatsapp-webhook',120);const raw=await body(req),match=String(raw.text||'').trim().match(/^ZapDMR CONFIRMAR ([A-Za-z0-9_-]{43}) (\d{6})$/i);
+  if(!match)return json(res,200,{accepted:false});
+  let number;try{const supplied=String(raw.number||'');number=phone(supplied.startsWith('+')?supplied:'+'+supplied);}catch{return json(res,200,{accepted:false});}
+  const row=db.prepare("SELECT c.*,r.phone_hash FROM codes c JOIN registrations r ON r.id=c.registration_id WHERE c.challenge_hash=? AND c.mode='reverse'").get(hash(match[1]));
+  if(!row||row.expires_at<=Date.now()||row.attempts>=5||!safeEqual(row.phone_hash,hash(number))||!safeEqual(row.hash,hash(row.registration_id+':'+match[2])))return json(res,200,{accepted:false});
+  db.prepare("UPDATE codes SET reverse_confirmed_at=COALESCE(reverse_confirmed_at,?) WHERE registration_id=? AND challenge_hash=? AND mode='reverse' AND expires_at>? AND attempts<5").run(Date.now(),row.registration_id,row.challenge_hash,Date.now());
+  return json(res,200,{accepted:true});
+}
 async function api(req,res,url){
   const route=url.pathname;
-  if(route==='/v1/status'&&req.method==='GET')return json(res,200,{version:'1.3.0',registration:true,verificationConfigured:Boolean(process.env.OTP_DELIVERY_URL),owner:process.env.OWNER_NAME||'Responsável a configurar',privacyEmail:process.env.PRIVACY_EMAIL||null,downloads:Object.fromEntries(['android','windows'].map(platform=>{const file=path.join(downloadDir,installer(platform));return [platform,fs.existsSync(file)?{available:true,bytes:fs.statSync(file).size}: {available:false}];}))});
+  if(route==='/v1/status'&&req.method==='GET'){const configuration=deliveryConfiguration();return json(res,200,{version:'1.3.1',registration:true,verificationConfigured:Boolean(configuration.direct||configuration.reverse||developmentOtp),verificationMode:configuration.direct?'direct':configuration.reverse?'reverse':developmentOtp?'development':'unavailable',verificationRequired:true,downloadRequiresVerification:true,developmentMode:developmentOtp,owner:process.env.OWNER_NAME||'Responsável a configurar',privacyEmail:process.env.PRIVACY_EMAIL||null,downloads:Object.fromEntries(['android','windows'].map(platform=>{const file=path.join(downloadDir,installer(platform));return [platform,fs.existsSync(file)?{available:true,bytes:fs.statSync(file).size}: {available:false}];}))});}
+  if(route==='/v1/whatsapp/webhook'&&req.method==='POST')return receiveWhatsApp(req,res);
   if(route==='/v1/registrations'&&req.method==='POST'){
     rate(req,'registration',10,3600000);const raw=await body(req);if(raw.noticeAccepted!==true)throw Object.assign(new Error('Leia e aceite a utilização dos dados para o cadastro.'),{status:400});const call=callsign(raw.callsign),id=radioId(raw.dmrId),number=phone(raw.whatsapp),platform=raw.platform==='windows'?'windows':'android',registrationId=crypto.randomUUID();
-    db.prepare('INSERT INTO registrations VALUES(?,?,?,?,?,?,?,?,?)').run(registrationId,call,id,seal(number),hash(number),raw.sharePhone===true?1:0,platform,Date.now(),'2026-10-19');
-    const available=fs.existsSync(path.join(downloadDir,installer(platform)));return json(res,201,{registrationId,verified:false,downloadAvailable:available,downloadUrl:available?`/download/${downloadToken(registrationId,platform)}`:null,message:available?'Cadastro recebido. O download está disponível.':'Cadastro recebido. O instalador desta plataforma ainda não foi publicado.'});
+    db.prepare('INSERT INTO registrations(id,callsign,dmr_id,phone_cipher,phone_hash,share_phone,platform,created_at,notice_version) VALUES(?,?,?,?,?,?,?,?,?)').run(registrationId,call,id,seal(number),hash(number),raw.sharePhone===true?1:0,platform,Date.now(),'2026-10-20');
+    const available=fs.existsSync(path.join(downloadDir,installer(platform))),row=db.prepare('SELECT * FROM registrations WHERE id=?').get(registrationId),challenge=raw.requestVerification===true?await issueChallenge(req,row):undefined;
+    return json(res,201,{registrationId,verified:false,verificationRequired:true,downloadAvailable:available,downloadUrl:null,...(challenge?{challenge}:{}),message:'Cadastro recebido. Confirme o seu WhatsApp para liberar o download e o ZapChat.'});
   }
   if(route==='/v1/auth/request-code'&&req.method==='POST'){
     rate(req,'otp',5,600000);const raw=await body(req),row=db.prepare('SELECT * FROM registrations WHERE id=?').get(String(raw.registrationId||''));if(!row)throw Object.assign(new Error('Faça primeiro o cadastro.'),{status:404});
-    const prior=db.prepare('SELECT * FROM users WHERE callsign=? OR dmr_id=?').get(row.callsign,row.dmr_id);if(prior&&prior.phone_hash!==row.phone_hash)throw Object.assign(new Error('Este indicativo já possui uma conta. Use o número existente ou contacte o responsável.'),{status:409});
-    const endpoint=process.env.OTP_DELIVERY_URL;if(!endpoint||!/^https:\/\//.test(endpoint))throw Object.assign(new Error('A verificação do número aguarda configuração do serviço de códigos pelo administrador. O download e o rádio continuam disponíveis.'),{status:503});
-    const phoneLimitKey='otp-phone:'+row.phone_hash,previousDelivery=limits.get(phoneLimitKey);if(previousDelivery&&previousDelivery.until>Date.now())throw Object.assign(new Error('Aguarde um minuto antes de pedir outro código para este número.'),{status:429});limits.set(phoneLimitKey,{n:1,until:Date.now()+60000});const code=String(crypto.randomInt(100000,1000000));db.prepare('INSERT INTO codes VALUES(?,?,?,0) ON CONFLICT(registration_id) DO UPDATE SET hash=excluded.hash,expires_at=excluded.expires_at,attempts=0').run(row.id,hash(row.id+':'+code),Date.now()+600000);
-    const sent=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+(process.env.OTP_DELIVERY_TOKEN||'')},body:JSON.stringify({phone:unseal(row.phone_cipher),code,expiresInSeconds:600}),signal:AbortSignal.timeout(12000)});if(!sent.ok){db.prepare('DELETE FROM codes WHERE registration_id=?').run(row.id);throw Object.assign(new Error('O serviço de códigos não aceitou o envio. Tente mais tarde.'),{status:503});}return json(res,200,{sent:true,expiresInSeconds:600});
+    return json(res,200,await issueChallenge(req,row));
   }
+  if(route==='/v1/auth/status'&&req.method==='POST'){rate(req,'otp-status',120);return json(res,200,challengeStatus(await body(req)));}
   if(route==='/v1/auth/verify'&&req.method==='POST'){
-    rate(req,'verify',20,600000);const raw=await body(req),row=db.prepare('SELECT r.*,c.hash AS code_hash,c.expires_at,c.attempts FROM registrations r JOIN codes c ON c.registration_id=r.id WHERE r.id=?').get(String(raw.registrationId||''));
-    if(!row||row.expires_at<Date.now()||row.attempts>=5)throw Object.assign(new Error('Código expirado ou bloqueado. Solicite outro.'),{status:401});db.prepare('UPDATE codes SET attempts=attempts+1 WHERE registration_id=?').run(row.id);if(!safeEqual(hash(row.id+':'+String(raw.code||'')),row.code_hash))throw Object.assign(new Error('Código incorreto.'),{status:401});
-    const existing=db.prepare('SELECT * FROM users WHERE callsign=? OR dmr_id=?').get(row.callsign,row.dmr_id);if(existing&&(existing.phone_hash!==row.phone_hash||existing.callsign!==row.callsign||existing.dmr_id!==row.dmr_id))throw Object.assign(new Error('O perfil já está vinculado a outra conta.'),{status:409});
-    const id=existing?.id||crypto.randomUUID();if(!existing)db.prepare('INSERT INTO users VALUES(?,?,?,?,?,?,?,?)').run(id,row.callsign,row.dmr_id,row.phone_cipher,row.phone_hash,row.share_phone,Date.now(),Date.now());else db.prepare('UPDATE users SET share_phone=? WHERE id=?').run(row.share_phone,id);
-    db.prepare('DELETE FROM codes WHERE registration_id=?').run(row.id);const token=crypto.randomBytes(32).toString('base64url');db.prepare('INSERT INTO sessions VALUES(?,?,?)').run(hash(token),id,Date.now()+30*86400000);return json(res,200,{token,user:publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(id),true),expiresInDays:30});
+    rate(req,'verify',20,600000);const raw=await body(req),row=db.prepare('SELECT r.*,c.hash AS code_hash,c.expires_at,c.attempts,c.mode,c.challenge_hash,c.reverse_confirmed_at FROM registrations r JOIN codes c ON c.registration_id=r.id WHERE r.id=?').get(String(raw.registrationId||''));
+    if(!row||row.expires_at<=Date.now()||row.attempts>=5||!['direct','reverse','development'].includes(row.mode))throw Object.assign(new Error('Código expirado ou indisponível. Solicite outro.'),{status:401});
+    if(row.mode==='reverse'&&(!/^[A-Za-z0-9_-]{43}$/.test(String(raw.challengeToken||''))||!safeEqual(row.challenge_hash||'',hash(String(raw.challengeToken)))||!row.reverse_confirmed_at))throw Object.assign(new Error('Envie primeiro a mensagem pronta pelo WhatsApp do número cadastrado. A confirmação precisa chegar ao servidor.'),{status:401});
+    if(row.mode==='development'&&(!developmentOtp||!loopback(req.socket.remoteAddress)))throw Object.assign(new Error('Homologação permitida somente neste servidor local.'),{status:403});
+    db.prepare('UPDATE codes SET attempts=attempts+1 WHERE registration_id=?').run(row.id);if(!/^\d{6}$/.test(String(raw.code||''))||!safeEqual(hash(row.id+':'+String(raw.code)),row.code_hash))throw Object.assign(new Error('Código incorreto.'),{status:401});
+    const existing=registrationIdentity(row),id=existing?.id||crypto.randomUUID(),now=Date.now(),isVerified=row.mode==='development'?0:1,token=crypto.randomBytes(32).toString('base64url');
+    db.exec('BEGIN IMMEDIATE');
+    try{
+      if(!existing)db.prepare('INSERT INTO users(id,callsign,dmr_id,phone_cipher,phone_hash,share_phone,created_at,verified_at,whatsapp_verified,verification_method) VALUES(?,?,?,?,?,?,?,?,?,?)').run(id,row.callsign,row.dmr_id,row.phone_cipher,row.phone_hash,row.share_phone,now,now,isVerified,row.mode);
+      else db.prepare('UPDATE users SET share_phone=?,verified_at=?,whatsapp_verified=?,verification_method=? WHERE id=?').run(row.share_phone,now,isVerified,row.mode,id);
+      db.prepare('UPDATE registrations SET whatsapp_verified=?,verified_at=? WHERE id=?').run(isVerified,now,row.id);
+      if(Number(db.prepare('DELETE FROM codes WHERE registration_id=? AND hash=?').run(row.id,row.code_hash).changes)!==1)throw new Error('Código já utilizado.');
+      db.prepare('INSERT INTO sessions VALUES(?,?,?)').run(hash(token),id,now+30*86400000);db.exec('COMMIT');
+    }catch(error){db.exec('ROLLBACK');throw error;}
+    const available=fs.existsSync(path.join(downloadDir,installer(row.platform)));
+    return json(res,200,{token,user:publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(id),true),expiresInDays:30,downloadAvailable:available,downloadUrl:available?`/download/${downloadToken(row.id,row.platform)}`:null});
   }
   const me=user(req);rate(req,'authenticated',240);
   if(route==='/v1/me'&&req.method==='GET')return json(res,200,{user:publicUser(me,true)});
@@ -116,10 +189,10 @@ const mime={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8',
 const server=http.createServer(async(req,res)=>{res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','strict-origin-when-cross-origin');res.setHeader('X-Frame-Options','DENY');res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");if(prod)res.setHeader('Strict-Transport-Security','max-age=31536000');
   const requestOrigin=req.headers.origin;if(requestOrigin){if(requestOrigin!==origin&&!/^https?:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/.test(requestOrigin)&&requestOrigin!=='capacitor://localhost')return json(res,403,{message:'Origem não autorizada.'});res.setHeader('Access-Control-Allow-Origin',requestOrigin);res.setHeader('Vary','Origin');res.setHeader('Access-Control-Allow-Headers','Content-Type, Authorization');res.setHeader('Access-Control-Allow-Methods','GET, POST, PATCH, DELETE, OPTIONS');}
   if(req.method==='OPTIONS'){res.writeHead(204);res.end();return;}
-  try{const url=new URL(req.url,'http://localhost');if(url.pathname.startsWith('/v1/'))return await api(req,res,url);if(url.pathname.startsWith('/download/'))return download(req,res,url.pathname.slice(10));if(url.pathname==='/source'){const source=path.join(downloadDir,'ZapDMR-source.zip');if(!fs.existsSync(source))return json(res,404,{message:'Arquivo de código-fonte ainda não publicado.'});res.writeHead(200,{'Content-Type':'application/zip','Content-Disposition':'attachment; filename=ZapDMR-1.3.0-source.zip','Content-Length':fs.statSync(source).size});streamFile(source,res);return;}if(url.pathname==='/admin'||url.pathname==='/admin/'){rate(req,'admin',10);const credential=Buffer.from(String(req.headers.authorization||'').replace(/^Basic /,''),'base64').toString();if(!process.env.ADMIN_PASSWORD||!safeEqual(credential,'admin:'+process.env.ADMIN_PASSWORD)){res.setHeader('WWW-Authenticate','Basic realm="ZapDMR"');return json(res,401,{message:'Autenticação administrativa necessária.'});}return json(res,200,{registrations:db.prepare('SELECT callsign,dmr_id,platform,created_at FROM registrations ORDER BY created_at DESC LIMIT 200').all(),verifiedUsers:db.prepare('SELECT count(*) AS n FROM users').get().n});}
+  try{const url=new URL(req.url,'http://localhost');if(url.pathname.startsWith('/v1/'))return await api(req,res,url);if(url.pathname.startsWith('/download/'))return download(req,res,url.pathname.slice(10));if(url.pathname==='/source'){const source=path.join(downloadDir,'ZapDMR-source.zip');if(!fs.existsSync(source))return json(res,404,{message:'Arquivo de código-fonte ainda não publicado.'});res.writeHead(200,{'Content-Type':'application/zip','Content-Disposition':'attachment; filename=ZapDMR-1.3.1-source.zip','Content-Length':fs.statSync(source).size});streamFile(source,res);return;}if(url.pathname==='/admin'||url.pathname==='/admin/'){rate(req,'admin',10);const credential=Buffer.from(String(req.headers.authorization||'').replace(/^Basic /,''),'base64').toString();if(!process.env.ADMIN_PASSWORD||!safeEqual(credential,'admin:'+process.env.ADMIN_PASSWORD)){res.setHeader('WWW-Authenticate','Basic realm="ZapDMR"');return json(res,401,{message:'Autenticação administrativa necessária.'});}return json(res,200,{registrations:db.prepare('SELECT callsign,dmr_id,platform,created_at FROM registrations ORDER BY created_at DESC LIMIT 200').all(),verifiedUsers:db.prepare('SELECT count(*) AS n FROM users').get().n});}
     if(!['GET','HEAD'].includes(req.method))return json(res,405,{message:'Método não permitido.'});
     let pathname=decodeURIComponent(url.pathname);
-    if(pathname==='/healthz'){db.prepare('SELECT 1').get();return json(res,200,{ok:true,version:'1.3.0'});}
+    if(pathname==='/healthz'){db.prepare('SELECT 1').get();return json(res,200,{ok:true,version:'1.3.1'});}
     const aliases={'/downloads':'/#downloads','/downloads/':'/#downloads','/recursos':'/#recursos','/recursos/':'/#recursos','/comunidade':'/#comunidade','/comunidade/':'/#comunidade','/privacidade':'/privacidade/','/termos':'/termos/','/index.html':'/'};
     if(aliases[pathname]){res.writeHead(308,{Location:aliases[pathname]});return res.end();}
     if(pathname==='/robots.txt'||pathname==='/sitemap.xml'){

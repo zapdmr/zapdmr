@@ -1,4 +1,4 @@
-param([switch]$DebugApk)
+param([switch]$DebugApk,[switch]$SkipNativeBuild)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $env:GRADLE_USER_HOME = Join-Path $projectRoot '.gradle-user-home'
@@ -37,8 +37,15 @@ try {
     npm.cmd ci
     if ($LASTEXITCODE -ne 0) { throw 'npm ci failed.' }
   }
-  & (Join-Path $PSScriptRoot 'build-vocoder-android.ps1')
-  if ($LASTEXITCODE -ne 0) { throw 'Falha ao compilar o vocoder ARM para Android.' }
+  if ($SkipNativeBuild) {
+    foreach ($abi in @('arm64-v8a','armeabi-v7a')) {
+      $existingHelper = Join-Path $projectRoot ('android/app/src/main/jniLibs/' + $abi + '/libqso_dmr_vocoder_helper.so')
+      if (-not (Test-Path -LiteralPath $existingHelper -PathType Leaf)) { throw "Helper de vocoder existente ausente para $abi; não é possível preservar os binários nativos." }
+    }
+  } else {
+    & (Join-Path $PSScriptRoot 'build-vocoder-android.ps1')
+    if ($LASTEXITCODE -ne 0) { throw 'Falha ao compilar o vocoder ARM para Android.' }
+  }
   if (-not (Test-Path -LiteralPath (Join-Path $projectRoot 'android'))) {
     node scripts/capacitor-cli.cjs add android
     if ($LASTEXITCODE -ne 0) { throw 'Capacitor não conseguiu adicionar a plataforma Android.' }

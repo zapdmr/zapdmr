@@ -1,121 +1,82 @@
-# Portal e comunidade ZapDMR 1.3.0
+# Portal e comunidade ZapDMR 1.3.1
 
-Portal publicado em **[www.zapdmr.com.br](https://www.zapdmr.com.br)**, com Cloudflare Workers Free e banco D1. A homepage foi aberta por HTTPS no navegador em 19/10/2026. O domínio sem `www` redireciona para o endereço canônico.
+O portal está publicado em **[www.zapdmr.com.br](https://www.zapdmr.com.br)**, usando Cloudflare Workers Free e D1. O responsável é **Rizandro Cesar da Silva**; contato e privacidade: **rizandro@gmail.com**. O domínio sem www redireciona para a origem canônica.
 
-Homepage, `/healthz`, `/v1/status`, privacidade e termos responderam HTTP 200 por HTTPS direto fora do sandbox restrito, sem ignorar a validação de certificado. O estado da API confirmou os downloads disponíveis nas duas plataformas; os três assets APK, EXE e fontes também responderam HTTP 200 a HEAD no GitHub. HSTS está ativo com `max-age=31536000`.
+## Estado em 20/10/2026
 
-Os instaladores e o código-fonte estão publicados na [pré-release v1.3.0](https://github.com/zapdmr/zapdmr/releases/tag/v1.3.0). As URLs reais dos arquivos, tamanhos e hashes dos instaladores estão configurados no Worker. **A confirmação de telefone ainda depende do provedor de entrega de códigos:** novos usuários não conseguem confirmar o número ou entrar no ZapChat enquanto esse serviço não for ativado.
+O frontend e a API 1.3.1 com confirmação de WhatsApp foram publicados no Worker. A migração OTP foi aplicada ao D1 remoto. Os instaladores locais `release/ZapDMR-Android-1.3.1.apk` e `release/ZapDMR-Windows-1.3.1.exe` foram gerados. A configuração de URLs de download deve acompanhar a Release realmente publicada; enquanto ela apontar para v1.3.0, esse é o instalador distribuído pelo portal.
 
-O material de referência em `C:\ZapDMR_New\Site` continha README e uma demonstração HTML. Esta versão contém o servidor real e os ficheiros públicos, com recursos locais e sem dependências de CDN.
+A ponte WhatsApp local está aberta em **http://127.0.0.1:4193**, com QR disponível para o responsável vincular o número oficial **+55 43 99674-1200**. O pareamento humano e a primeira entrega real ainda estão pendentes. Um QR gerado ou `verificationConfigured:true` não comprova envio nem posse de um número.
 
-## Hospedagem gratuita escolhida
+Consulte [a verificação de hoje](VERIFICACAO-2026-10-20.md). O [registro de 19/10/2026](VERIFICACAO-2026-10-19.md) permanece como histórico da versão anterior.
 
-O responsável escolheu a opção gratuita. A pasta [`cloudflare/`](cloudflare/README.md) contém a implantação em Workers + D1. O Worker está publicado, o banco remoto foi criado e inicializado, os três segredos de produção foram configurados e a zona DNS está ativa na Cloudflare. Não é necessário contratar o servidor Node para essa opção.
+## Fluxo de cadastro e ativação
 
-O responsável é **Rizandro Cesar da Silva**, com contacto público **rizandro@gmail.com**. O repositório público [zapdmr/zapdmr](https://github.com/zapdmr/zapdmr) contém o código e a documentação de autenticação. A pré-release `v1.3.0` foi publicada com APK, EXE, fontes e SHA-256. Os arquivos da Release são públicos também fora do formulário. A entrega de códigos é uma configuração separada, necessária para confirmar números e liberar novas contas da comunidade.
+1. No site ou em **Definições → Perfil → Comunidade · WhatsApp e ZapChat** do app, preencha indicativo, DMR ID e WhatsApp internacional; aceite o uso dos dados. A partilha do telefone com outros operadores é uma escolha separada, desativada por padrão.
+2. Ao continuar, a interface abre a confirmação de seis dígitos. O código expira após dez minutos, permite até cinco tentativas e pode ser reenviado após 60 segundos. É possível corrigir o número e iniciar outro cadastro.
+3. A API usa o adaptador HTTPS configurado ou a ponte local conectada para entregar o código. Se a entrega estiver indisponível, pode oferecer confirmação reversa: o usuário envia pelo próprio WhatsApp a mensagem pronta para o número oficial.
+4. A confirmação reversa só é aceita após o servidor receber, de uma ponte autenticada, o remetente real e a mensagem com desafio aleatório e código correspondentes. Abrir um link wa.me ou digitar um código exibido não confirma o telefone.
+5. A validação consome o desafio, marca o número real como confirmado, cria uma sessão de 30 dias para ZapChat e devolve um link assinado de download com validade de 15 minutos quando o instalador estiver disponível.
 
-Consulte a [arquitetura de autenticação](AUTENTICACAO.md) e o [registro da verificação de 19/10/2026](VERIFICACAO-2026-10-19.md) para componentes, fluxo de credenciais e limites observados.
+O fluxo do portal agora exige confirmação antes de liberar o instalador. As Releases públicas do GitHub continuam acessíveis fora desse fluxo, e o código-fonte GPL permanece público em `/source`. A confirmação do número não comprova licença, indicativo ou atribuição do DMR ID.
 
-As instruções Node/VPS abaixo continuam como alternativa; não são o procedimento de publicação do Worker.
+## Entrega pelo WhatsApp
 
-## Executar localmente
+A configuração completa está em [WHATSAPP-OTP.md](WHATSAPP-OTP.md).
 
-Requer Node.js 22.13+ com `node:sqlite` (recomendado Node LTS atual).
+| Modo | Configuração | Comprovação |
+| --- | --- | --- |
+| Adaptador direto | `WHATSAPP_API_URL` e `WHATSAPP_API_TOKEN` | Código entregue pelo adaptador privado e digitado pelo titular |
+| Ponte local | `WHATSAPP_LOCAL_BRIDGE=1`, número oficial, token privado e sessão QR ativa | Fila no Worker, envio pelo WhatsApp vinculado e validação do código |
+| Reverso | `WHATSAPP_CONFIRM_NUMBER` e `WHATSAPP_WEBHOOK_TOKEN` | Mensagem recebida do próprio número por webhook autenticado |
+| Homologação Node | `OTP_MODE=development`, ambiente e acesso locais | Demonstração isolada; nunca marca WhatsApp real como confirmado |
 
-```powershell
-cd "C:\Users\User\Documents\Codex\2026-10-16\eu-vou-te-passar-o-instalador\outputs\site"
-node server.mjs
-```
+O adaptador direto recebe `POST {number,text}` com Bearer privado. O formato legado `OTP_DELIVERY_URL`/`OTP_DELIVERY_TOKEN` continua disponível com `{phone,code,expiresInSeconds}`. Provedores com outro contrato precisam de um adaptador.
 
-Abra `http://127.0.0.1:3000`. O modo local cria chaves privadas dentro de `data/`. Não publique essa pasta nem a inclua em ZIPs de código. A produção exige os segredos no ambiente.
+A [ponte local](whatsapp-bridge/README.md) usa Baileys 6.7.24, um cliente independente e sem vínculo oficial com a Meta. O PC e a conexão precisam permanecer ativos. A ponte consulta a fila por HTTPS de saída a cada cinco segundos; não precisa de túnel nem porta pública. O painel fica apenas em loopback. Configuração e sessão usam DPAPI CurrentUser do Windows, sem credenciais em texto no disco. O número vinculado precisa corresponder ao oficial; grupos, histórico e mensagens próprias não são encaminhados como confirmação.
 
-## O que está implementado
+Não existe código mestre de produção nem aprovação automática. Sem envio disponível e sem mensagem reversa recebida por uma ponte válida, o número permanece pendente. O modo de homologação Node usa exclusivamente `zapdmr-development.sqlite`, exige origem/escuta/acesso locais e é recusado em produção; suas contas recebem `whatsapp_verified=false`.
 
-- Portal responsivo, formulário com indicativo, DMR ID e WhatsApp obrigatório em formato internacional.
-- Cadastro persistente SQLite; telefone e mensagens cifrados com AES-256-GCM.
-- Downloads reais via links assinados com validade de 15 minutos. Sem ficheiro, o portal informa a indisponibilidade.
-- Pedido e confirmação de código, sessões de 30 dias, diretório autenticado por pesquisa exata.
-- Partilha do número opcional, revogável e desativada por padrão. Cadastros sem confirmação não entram no diretório.
-- ZapChat próprio, com histórico, leitura, bloqueio de contacto e eliminação de conta/mensagens.
-- Integração WhatsApp por `https://wa.me/numero`: abre a aplicação oficial ou Web; o operador envia por lá.
-- Painel administrativo de contagens/cadastros em `/admin`, com autenticação Basic e senha de ambiente. Não há lista pública de telefones.
+## Hospedagem e arquivos
 
-**WhatsApp e ZapChat são serviços distintos.** Isto não incorpora as conversas de contas pessoais do WhatsApp dentro do ZapDMR. Não foi usada automação não oficial do WhatsApp. A confirmação por código valida o número informado, não uma licença de radioamador nem a titularidade do indicativo.
+A implantação atual está em [cloudflare/](cloudflare/README.md), com Worker `zapdmr-community`, banco D1 remoto, domínio HTTPS e segredos privados. O servidor Node de `server.mjs` é uma alternativa de hospedagem.
 
-## Configuração Node/VPS — alternativa
+O repositório [zapdmr/zapdmr](https://github.com/zapdmr/zapdmr) e a [Release v1.3.0](https://github.com/zapdmr/zapdmr/releases/tag/v1.3.0) já estavam publicados. Uma atualização 1.3.1 deve publicar APK, EXE, fontes correspondentes e hashes e depois atualizar as URLs do Worker. Não coloque instaladores grandes nos assets estáticos nem no histórico Git.
 
-Use `.env.example` como referência; o processo não carrega esse ficheiro automaticamente. Configure as variáveis no painel da hospedagem ou num ficheiro de ambiente protegido do serviço:
+Na alternativa Node, coloque os arquivos finais em:
 
-1. `NODE_ENV=production`, `PUBLIC_ORIGIN=https://www.zapdmr.com.br`.
-2. `DATA_ENCRYPTION_KEY` e `DOWNLOAD_SECRET`: **segredos diferentes**, cada um com 64 caracteres hexadecimais aleatórios. Guarde cópias protegidas. Perder a chave impede ler os dados existentes.
-3. `ADMIN_PASSWORD`: pelo menos 16 caracteres; não partilhar com os utilizadores.
-4. `OWNER_NAME` e `PRIVACY_EMAIL`: responsável real e canal de privacidade. O servidor recusa iniciar em produção sem estes dados.
-5. `DATA_DIR` e `DOWNLOAD_DIR`: armazenamento persistente fora de `public/`.
-6. Proxy HTTPS (Caddy, Nginx ou plataforma). A porta Node deve permanecer inacessível externamente. `TRUST_LOCAL_PROXY=1` apenas quando um proxy local confiável sobrescrever `X-Real-IP`.
-7. Backup cifrado do banco e backup separado das chaves, com permissões restritas.
-
-O domínio no Registro.br e o pagamento não configuram a hospedagem ou o DNS automaticamente. Os ficheiros `Caddyfile` e `zapdmr.service` são modelos para VPS Linux; adapte utilizador/caminhos ao plano contratado.
-
-### IP dos visitantes no VPS com Caddy
-
-Ao utilizar o `Caddyfile` fornecido no mesmo VPS, configure `HOST=127.0.0.1` e **`TRUST_LOCAL_PROXY=1`**. O Caddy sobrescreve `X-Real-IP` com o endereço da ligação recebida e encaminha para o Node em loopback. A porta 3000 deve permanecer inacessível pela internet. Assim, os limites de cadastro e pedidos de código são aplicados a cada endereço visitante; com `0`, todos os visitantes atrás desse proxy partilhariam os limites do endereço local.
-
-O exemplo conserva `TRUST_LOCAL_PROXY=0` para os demais cenários. Só altere para `1` quando houver um proxy local confiável que sobrescreva o cabeçalho; não confie num cabeçalho fornecido diretamente pelo visitante. Se houver outro proxy ou CDN antes do Caddy, adapte e verifique a cadeia de confiança antes da publicação.
-
-## Entrega dos códigos — pendência de infraestrutura
-
-Sem `OTP_DELIVERY_URL`, os downloads e cadastros funcionam, mas a verificação, o diretório e o chat não são ativados. Isso evita publicar números apenas porque alguém os digitou.
-
-Configure um adaptador privado HTTPS de entrega de SMS ou de template de autenticação aprovado do WhatsApp Business. O servidor fará:
-
-```http
-POST https://seu-adaptador/entregar-codigo
-Authorization: Bearer <OTP_DELIVERY_TOKEN>
-Content-Type: application/json
-
-{"phone":"+55...","code":"123456","expiresInSeconds":600}
-```
-
-O adaptador deve entregar o código ao titular e devolver sucesso HTTP somente se aceitou a entrega. Não registe o corpo, código ou número em logs. O código nunca é devolvido ao aplicativo. Há limites de tentativas, expiração de 10 minutos e bloqueio após cinco códigos errados.
-
-Este pacote não cria contas em provedores de SMS/Meta, não inclui credenciais desses serviços e não realizou envios reais. A hospedagem Cloudflare já está ativa; o provedor de entrega ainda precisa ser definido pelo responsável.
-
-## Instaladores
-
-Na hospedagem Cloudflare atual, os arquivos são distribuídos pela [pré-release v1.3.0 do GitHub](https://github.com/zapdmr/zapdmr/releases/tag/v1.3.0). `DOWNLOAD_ANDROID_URL`, `DOWNLOAD_WINDOWS_URL` e `SOURCE_URL` já contêm os endereços reais dos assets; os instaladores também têm tamanho e SHA-256 registrados na configuração. Consulte o procedimento de atualização em [`cloudflare/README.md`](cloudflare/README.md).
-
-Para a alternativa Node/VPS, coloque os artefactos finais com os nomes:
-
-```
+```text
 private/downloads/ZapDMR-Android.apk
 private/downloads/ZapDMR-Windows.exe
 private/downloads/ZapDMR-source.zip
 ```
 
-O código-fonte correspondente é disponibilizado livremente em `/source`, sem cadastro, quando o arquivo ou sua URL estiver configurado. No Node, também pode utilizar `DOWNLOAD_DIR`. Os instaladores 1.3.0 permanecem nos arquivos de distribuição em `outputs/release` e `outputs/out`; o ZIP do site exclui os instaladores e todos os dados privados.
+O arquivo `.env.example` documenta a configuração. O processo não o carrega automaticamente: configure o ambiente protegido do serviço. Node 22.13+ é necessário para `node:sqlite`.
 
-## Ligar o aplicativo ao serviço
+```powershell
+node server.mjs
+```
 
-No ZapDMR: **Definições → Perfil → Comunidade · WhatsApp e ZapChat**.
+A origem local padrão é `http://localhost:3000`; o servidor escuta em `127.0.0.1`. Chaves e banco ficam fora de `public/`. A produção requer origem HTTPS, responsável, e-mail, chave de dados e segredo de download distintos com 64 caracteres hexadecimais e senha administrativa forte. Mantenha backups cifrados do banco e proteção separada das chaves.
 
-1. Preencha o WhatsApp obrigatório no perfil e guarde os dados de rádio.
-2. Informe o servidor da comunidade e aceite o envio dos dados para esse endereço.
-3. Escolha separadamente se autoriza a partilha do WhatsApp.
-4. Cadastre-se. A solicitação e confirmação do código dependem da ativação do provedor de entrega, ainda pendente na produção atual.
-5. Pesquise o indicativo ou DMR ID exato. “Chamar no Zap” abre o WhatsApp apenas se o titular partilhou o número; a caixa de conversa usa ZapChat.
+Com o Caddyfile no mesmo VPS, `TRUST_LOCAL_PROXY=1` só deve ser usado quando o proxy sobrescrever X-Real-IP e a porta Node permanecer inacessível externamente. O padrão 0 não confia em cabeçalhos fornecidos por visitantes.
 
-O telefone e o token são protegidos por DPAPI no Windows e pelo armazenamento cifrado Android. Não são colocados em `localStorage`, nem enviados ao master DMR. O rádio não depende do servidor da comunidade para transportar áudio.
+## Credenciais, privacidade e conversa
 
-## Sincronização de mensagens e confirmações de leitura
+O app protege telefone e token por DPAPI no Windows e armazenamento cifrado com AndroidKeyStore no Android. O token não fica no localStorage. A sessão da comunidade é separada da Hotspot Security Password e do handshake HBP; o áudio do rádio não transporta esses dados.
 
-`GET /v1/messages?peer=UUID&after=0&receiptAfter=0&wait=1` mantém o campo `messages` e acrescenta `receipts` com objetos `{id, readAt}` e `nextReceiptCursor`. Os cursores `after` e `receiptAfter` são inclusivos. Depois de receber mensagens, avance `after` para o maior `at` recebido mais 1. Para os recibos, use diretamente `nextReceiptCursor` na próxima consulta; quando não há recibos, o servidor conserva o cursor enviado. O limite de cada lista é de 100 elementos. Os horários das novas mensagens e das novas leituras são monotônicos, e a ordenação usa também o ID.
+ZapChat é o chat próprio do ZapDMR. O botão **Chamar no Zap** abre o WhatsApp oficial quando o titular compartilhou o número. As conversas pessoais do WhatsApp não são incorporadas ao aplicativo. Dados de telefone e conteúdo de ZapChat são cifrados antes da persistência; o servidor possui a chave, portanto não há cifragem ponta a ponta. Consulte [AUTENTICACAO.md](AUTENTICACAO.md) para componentes, requisições e tratamento de tokens.
 
-Novos clientes devem enviar `receiptAfter` desde a primeira consulta, aplicar os recibos às mensagens existentes pelo `id` e continuar a consulta com o cursor devolvido. `wait=1` permite aguardar até 25 segundos quando não existem mensagens nem recibos novos. `POST /v1/messages/read` devolve `{ok: true, changed: N}`. No Worker, a consulta pendente volta a procurar novidades após a espera; uma mensagem ou leitura pode levar até 25 segundos para aparecer.
+O diretório exige autenticação e pesquisa exata. Bloqueios impedem descoberta e conversa nas duas direções. Excluir a conta remove sessões, mensagens e bloqueios associados. Sair da comunidade apaga o token local; não implementa revogação individual das demais cópias de sessão.
 
-O aplicativo 1.3.0 atual continua compatível com `messages` e `after`, mas não consome `receipts`: uma confirmação de leitura só aparece quando a mensagem volta a ser obtida numa nova sincronização do histórico. A atualização de leitura ao vivo requer adaptar o cliente para consumir os recibos. Esta documentação descreve o contrato implementado; não confirma uma validação completa com hospedagem, entrega de códigos e dispositivos reais.
+## Mensagens e recibos
 
-## Antes do lançamento
+`GET /v1/messages?peer=UUID&after=0&receiptAfter=0&wait=1` devolve mensagens, recibos `{id,readAt}` e `nextReceiptCursor`. Os cursores são inclusivos e cada lista tem até 100 elementos. Avance after ao maior at recebido mais 1; para recibos, use o próximo cursor devolvido. `POST /v1/messages/read` marca leituras do par autenticado.
 
-Os textos de privacidade e termos descrevem esta implementação e já identificam o responsável e o contacto confirmados. Ative e valide a entrega de códigos e revise os procedimentos de atendimento/eliminação antes de anunciar a comunidade como operacional. O armazenamento é cifrado no servidor, **não ponta a ponta**. A verificação física de áudio, acessórios, GPS, conversa entre duas instalações reais e entrega do código dependem dos dispositivos e da infraestrutura.
+No Worker, uma consulta pendente pode levar até 25 segundos para devolver novidades. O cliente deve enviar receiptAfter e aplicar receipts para atualizar leituras sem recarregar o histórico; o módulo atual ainda usa o contrato básico de mensagens. Não há garantia de atualização instantânea.
 
-Referências: [WhatsApp Click to Chat](https://faq.whatsapp.com/5913398998672934/?locale=pt_BR), [APRS-IS](https://www.aprs-is.net/Connecting.aspx), [política de mosaicos OpenStreetMap](https://operations.osmfoundation.org/policies/tiles/).
+## Verificação pendente
+
+O registro de hoje distingue revisão de código, migração e compilação de validação real. Depois do pareamento, ainda é necessário observar o recebimento de um OTP por um titular real, a validação que libera o download e uma conversa entre duas instalações. O pareamento e essas entregas não foram demonstrados nesta revisão.
+
+As cotas de Workers/D1 e as condições de uso do WhatsApp precisam ser acompanhadas; hospedagem gratuita e ponte local não garantem operação contínua ou escala ilimitada.

@@ -5,9 +5,9 @@ const encoder=new TextEncoder(),decoder=new TextDecoder('utf-8',{fatal:true});
 const configs=new WeakMap();
 const NOTICE_VERSION='2026-10-19',DAY=86400000;
 
-function failure(status,message){return Object.assign(new Error(message),{status});}
+function failure(status,message,details={}){return Object.assign(new Error(message),{status,...details});}
 function json(status,value,headers={}){return new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...headers}});}
-function errorResponse(error){return json(error.status||500,{message:error.status?error.message:'Não foi possível concluir o pedido. Tente novamente.'});}
+function errorResponse(error){return json(error.status||500,{message:error.status?error.message:'Não foi possível concluir o pedido. Tente novamente.',...(Number.isInteger(error.retryAfterSeconds)?{retryAfterSeconds:error.retryAfterSeconds}:{})});}
 function hex(bytes){return Array.from(new Uint8Array(bytes),byte=>byte.toString(16).padStart(2,'0')).join('');}
 function unhex(value){return Uint8Array.from(value.match(/../g),part=>parseInt(part,16));}
 function base64(bytes){let text='';for(const byte of new Uint8Array(bytes))text+=String.fromCharCode(byte);return btoa(text);}
@@ -46,7 +46,8 @@ async function configuration(env){
         crypto.subtle.importKey('raw',bytes,{name:'HMAC',hash:'SHA-256'},false,['sign','verify']),
         crypto.subtle.importKey('raw',downloadBytes,{name:'HMAC',hash:'SHA-256'},false,['sign','verify'])
       ]);
-      return {aes,hmac,downloadHmac,origin:origin.origin,otpUrl:validOtpUrl(env.OTP_DELIVERY_URL),downloads:{android:validReleaseUrl(env.DOWNLOAD_ANDROID_URL),windows:validReleaseUrl(env.DOWNLOAD_WINDOWS_URL),source:validReleaseUrl(env.SOURCE_URL)}};
+      if(env.OTP_MODE==='development')throw failure(503,'Códigos visíveis de homologação são permitidos somente no servidor local isolado.');
+      return {aes,hmac,downloadHmac,origin:origin.origin,otpUrl:validOtpUrl(env.OTP_DELIVERY_URL),whatsappUrl:validOtpUrl(env.WHATSAPP_API_URL),downloads:{android:validReleaseUrl(env.DOWNLOAD_ANDROID_URL),windows:validReleaseUrl(env.DOWNLOAD_WINDOWS_URL),source:validReleaseUrl(env.SOURCE_URL)}};
     })();configs.set(env,pending);
   }
   return {...await pending,db:typeof env.DB.withSession==='function'?env.DB.withSession('first-primary'):env.DB};
@@ -79,7 +80,7 @@ async function currentUser(config,request){
   const row=await config.db.prepare('SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.hash=? AND s.expires_at>?').bind(await hash(config,token),Date.now()).first();
   if(!row)throw failure(401,'Sessão expirada. Confirme novamente o número.');return row;
 }
-async function publicUser(config,row,own=false){return {id:row.id,callsign:row.callsign,dmrId:row.dmr_id,verified:true,sharePhone:Boolean(row.share_phone),...(own||row.share_phone?{whatsapp:await unseal(config,row.phone_cipher)}:{})};}
+async function publicUser(config,row,own=false){return {id:row.id,callsign:row.callsign,dmrId:row.dmr_id,verified:Boolean(row.whatsapp_verified),whatsapp_verified:Boolean(row.whatsapp_verified),verificationMethod:row.verification_method,sharePhone:Boolean(row.share_phone),...(own||row.share_phone?{whatsapp:await unseal(config,row.phone_cipher)}:{})};}
 async function publicMessage(config,row,own){return {id:row.id,from:row.sender,to:row.recipient,text:await unseal(config,row.body_cipher),at:row.at,readAt:row.read_at,direction:row.sender===own?'out':'in',state:row.read_at?'read':'sent'};}
 function downloadMetadata(env,config,platform){
   if(!config.downloads[platform])return {available:false};
@@ -97,9 +98,49 @@ async function messageBatch(config,own,peer,after,receiptAfter,includeReceipts){
 function waitForMessages(signal){return new Promise((resolve,reject)=>{if(signal.aborted)return reject(failure(499,'Pedido cancelado.'));const finish=()=>{signal.removeEventListener('abort',abort);resolve();},timer=setTimeout(finish,25000),abort=()=>{clearTimeout(timer);signal.removeEventListener('abort',abort);reject(failure(499,'Pedido cancelado.'));};signal.addEventListener('abort',abort,{once:true});});}
 async function deliverCode(config,env,request,row,code){
   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),12000),abort=()=>controller.abort();request.signal.addEventListener('abort',abort,{once:true});
-  try{const response=await fetch(config.otpUrl,{method:'POST',redirect:'error',headers:{'Content-Type':'application/json',Authorization:'Bearer '+env.OTP_DELIVERY_TOKEN},body:JSON.stringify({phone:await unseal(config,row.phone_cipher),code,expiresInSeconds:600}),signal:controller.signal});const accepted=response.ok;await response.body?.cancel();if(!accepted)throw new Error('Delivery rejected');}
+  try{const number=await unseal(config,row.phone_cipher),modern=Boolean(config.whatsappUrl&&env.WHATSAPP_API_TOKEN);const response=await fetch(modern?config.whatsappUrl:config.otpUrl,{method:'POST',redirect:'error',headers:{'Content-Type':'application/json',Authorization:'Bearer '+(modern?env.WHATSAPP_API_TOKEN:env.OTP_DELIVERY_TOKEN)},body:JSON.stringify(modern?{number,text:otpMessage(row.callsign,code)}:{phone:number,code,expiresInSeconds:600}),signal:controller.signal});const accepted=response.ok;await response.body?.cancel();if(!accepted)throw new Error('Delivery rejected');}
   catch{throw failure(503,'O serviço de códigos não aceitou o envio. Tente mais tarde.');}
   finally{clearTimeout(timer);request.signal.removeEventListener('abort',abort);}
+}
+
+const otpMessage=(callsign,code)=>`*ZapDMR:* Olá ${callsign}, seu código de confirmação de 6 dígitos é: *${code}*. Forte 73!`;
+function reverseNumber(env){try{return normalizePhone(env.WHATSAPP_CONFIRM_NUMBER);}catch{return null;}}
+function reverseConfigured(env){return Boolean(reverseNumber(env)&&String(env.WHATSAPP_WEBHOOK_TOKEN||'').length>=32);}
+async function bridgeConnected(config,env){if(env.WHATSAPP_LOCAL_BRIDGE!=='1')return false;const state=await config.db.prepare('SELECT * FROM whatsapp_bridge_state WHERE id=1').first();return Boolean(state?.connected&&state.last_seen_at>Date.now()-20000);}
+async function verificationMode(config,env){
+  if((config.whatsappUrl&&env.WHATSAPP_API_TOKEN)||(config.otpUrl&&env.OTP_DELIVERY_TOKEN))return 'direct';
+  if(reverseConfigured(env))return env.WHATSAPP_LOCAL_BRIDGE==='1'&&await bridgeConnected(config,env)?'bridge':'reverse';
+  return 'unavailable';
+}
+async function bridgeAuth(config,env,request){const expected=String(env.WHATSAPP_WEBHOOK_TOKEN||'');if(expected.length<32)throw failure(503,'Configure o segredo privado da ponte WhatsApp.');const supplied=(request.headers.get('Authorization')||'').replace(/^Bearer /,'');if(supplied.length>256||!await sameHash(config,'whatsapp-bridge:'+supplied,await hash(config,'whatsapp-bridge:'+expected)))throw failure(401,'Autenticação da ponte necessária.');}
+async function assertIdentity(config,row){const prior=await config.db.prepare('SELECT * FROM users WHERE callsign=? OR dmr_id=? LIMIT 1').bind(row.callsign,row.dmr_id).first();if(prior&&(prior.phone_hash!==row.phone_hash||prior.callsign!==row.callsign||prior.dmr_id!==row.dmr_id))throw failure(409,'Este indicativo já possui uma conta. Use o número existente ou contacte o responsável.');return prior;}
+function phoneVariants(number){const digits=number.slice(1),variants=[number];if(/^55\d{2}[6-9]\d{7}$/.test(digits))variants.push('+'+digits.slice(0,4)+'9'+digits.slice(4));if(/^55\d{2}9[6-9]\d{7}$/.test(digits))variants.push('+'+digits.slice(0,4)+digits.slice(5));return variants;}
+async function challengeView(config,env,codeRow,plain){
+  const now=Date.now(),mode=codeRow.mode,result={mode,sent:mode==='direct',expiresInSeconds:Math.max(0,Math.ceil((codeRow.expires_at-now)/1000)),retryAfterSeconds:Math.max(0,Math.ceil((codeRow.requested_at+60000-now)/1000)),challengeToken:plain.token};
+  if(mode==='reverse'){
+    result.displayCode=plain.code;
+    result.whatsappUrl='https://wa.me/'+reverseNumber(env).slice(1)+'?text='+encodeURIComponent(`ZapDMR CONFIRMAR ${plain.token} ${plain.code}`);
+    result.message='Envie a mensagem pelo WhatsApp do número cadastrado. A confirmação acontece após a ponte receber e conferir o remetente.';
+  }else if(mode==='bridge'){const job=await config.db.prepare('SELECT status FROM whatsapp_outbox WHERE registration_id=? AND code_hash=? ORDER BY created_at DESC LIMIT 1').bind(codeRow.registration_id,codeRow.hash).first();result.sent=job?.status==='sent';result.queued=!result.sent;result.message=result.sent?'Código enviado pelo WhatsApp. Digite os seis dígitos recebidos.':'Código na fila da ponte WhatsApp. Aguarde o recebimento no número cadastrado.';}
+  else result.message='Código enviado ao número cadastrado. Expira em 10 minutos.';
+  return result;
+}
+async function issueChallenge(config,env,request,row){
+  await assertIdentity(config,row);
+  const prior=await config.db.prepare('SELECT requested_at FROM codes WHERE registration_id=?').bind(row.id).first(),now=Date.now();
+  if(prior&&prior.requested_at+60000>now)throw failure(429,'Aguarde para reenviar o código.',{retryAfterSeconds:Math.ceil((prior.requested_at+60000-now)/1000)});
+  let mode=await verificationMode(config,env);
+  if(mode==='unavailable')return {mode,sent:false,expiresInSeconds:600,retryAfterSeconds:60,message:'A confirmação aguarda a conexão do WhatsApp oficial. O número ainda não foi validado.'};
+  await rate(config,request,'otp-phone',1,60000,row.phone_hash);
+  const plain={code:otpCode(),token:randomToken()},codeHash=await hash(config,row.id+':'+plain.code),challengeHash=await hash(config,'otp-challenge:'+plain.token),cipher=await seal(config,JSON.stringify(plain));
+  await config.db.batch([
+    config.db.prepare('DELETE FROM whatsapp_outbox WHERE registration_id=?').bind(row.id),
+    config.db.prepare(`INSERT INTO codes(registration_id,hash,expires_at,attempts,requested_at,mode,challenge_hash,challenge_cipher,reverse_confirmed_at) VALUES(?,?,?,0,?,?,?,?,NULL)
+      ON CONFLICT(registration_id) DO UPDATE SET hash=excluded.hash,expires_at=excluded.expires_at,attempts=0,requested_at=excluded.requested_at,mode=excluded.mode,challenge_hash=excluded.challenge_hash,challenge_cipher=excluded.challenge_cipher,reverse_confirmed_at=NULL`).bind(row.id,codeHash,now+600000,now,mode,challengeHash,cipher)
+  ]);
+  if(mode==='direct')try{await deliverCode(config,env,request,row,plain.code);}catch(error){if(!reverseConfigured(env)){await config.db.prepare('DELETE FROM codes WHERE registration_id=? AND hash=?').bind(row.id,codeHash).run();return {mode:'unavailable',sent:false,expiresInSeconds:600,retryAfterSeconds:60,message:error.message};}mode='reverse';await config.db.prepare("UPDATE codes SET mode='reverse' WHERE registration_id=? AND hash=?").bind(row.id,codeHash).run();}
+  if(mode==='bridge')await config.db.prepare('INSERT INTO whatsapp_outbox(id,registration_id,code_hash,payload_cipher,status,created_at,expires_at) VALUES(?,?,?,?,?,?,?)').bind(crypto.randomUUID(),row.id,codeHash,await seal(config,JSON.stringify({number:await unseal(config,row.phone_cipher),text:otpMessage(row.callsign,plain.code)})),'queued',now,now+600000).run();
+  return challengeView(config,env,{registration_id:row.id,hash:codeHash,requested_at:now,expires_at:now+600000,mode},plain);
 }
 
 export async function handleApi(request,env,url=new URL(request.url)){
@@ -107,7 +148,35 @@ export async function handleApi(request,env,url=new URL(request.url)){
 }
 async function api(request,env,url,config){
   const route=url.pathname,method=request.method,db=config.db;
-  if(route==='/v1/status'&&method==='GET')return json(200,{version:'1.3.0',registration:true,verificationConfigured:Boolean(config.otpUrl&&env.OTP_DELIVERY_TOKEN),owner:env.OWNER_NAME,privacyEmail:env.PRIVACY_EMAIL,downloads:{android:downloadMetadata(env,config,'android'),windows:downloadMetadata(env,config,'windows')}});
+  if(route==='/v1/status'&&method==='GET'){const mode=await verificationMode(config,env);return json(200,{version:'1.3.1',registration:true,verificationConfigured:mode!=='unavailable',verificationMode:mode,developmentMode:false,bridgeConnected:await bridgeConnected(config,env),downloadRequiresVerification:true,owner:env.OWNER_NAME,privacyEmail:env.PRIVACY_EMAIL,downloads:{android:downloadMetadata(env,config,'android'),windows:downloadMetadata(env,config,'windows')}});}
+  if(route.startsWith('/v1/whatsapp/')&&method==='POST'){
+    await bridgeAuth(config,env,request);await rate(config,request,'whatsapp-bridge',120);const raw=await body(request),now=Date.now();
+    if(route==='/v1/whatsapp/webhook'){
+      const match=/^ZapDMR CONFIRMAR ([A-Za-z0-9_-]{43}) (\d{6})$/.exec(String(raw.text||'').trim());
+      if(!match)return json(200,{accepted:true,confirmed:false});
+      const from=normalizePhone(raw.number),row=await db.prepare('SELECT c.*,r.phone_hash FROM codes c JOIN registrations r ON r.id=c.registration_id WHERE c.challenge_hash=? AND c.expires_at>? AND c.attempts<5 AND c.mode=?').bind(await hash(config,'otp-challenge:'+match[1]),now,'reverse').first();
+      if(!row||!await sameHash(config,row.registration_id+':'+match[2],row.hash))return json(200,{accepted:true,confirmed:false});
+      const fromHashes=await Promise.all(phoneVariants(from).map(number=>hash(config,number)));
+      if(!fromHashes.includes(row.phone_hash))return json(200,{accepted:true,confirmed:false});
+      await db.prepare('UPDATE codes SET reverse_confirmed_at=? WHERE registration_id=? AND hash=? AND expires_at>? AND mode=?').bind(now,row.registration_id,row.hash,now,'reverse').run();return json(200,{accepted:true,confirmed:true});
+    }
+    if(route==='/v1/whatsapp/bridge/heartbeat'||route==='/v1/whatsapp/bridge/outbox'){
+      const provided=normalizePhone(raw.number),official=reverseNumber(env);if(!official||!phoneVariants(provided).includes(official))throw failure(403,'A ponte deve usar o WhatsApp oficial configurado.');
+      const connected=raw.connected===true;await db.prepare('INSERT INTO whatsapp_bridge_state(id,last_seen_at,connected) VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET last_seen_at=excluded.last_seen_at,connected=excluded.connected').bind(now,connected?1:0).run();
+      if(route.endsWith('/heartbeat'))return json(200,{ok:true});if(!connected)return json(200,{jobs:[]});
+      const leaseId=randomToken(),jobs=await db.prepare(`UPDATE whatsapp_outbox SET status='sending',lease_until=?,lease_id=?,attempts=attempts+1 WHERE id IN(
+        SELECT q.id FROM whatsapp_outbox q JOIN codes c ON c.registration_id=q.registration_id AND c.hash=q.code_hash
+        WHERE (q.status='queued' OR (q.status='sending' AND q.lease_until<?)) AND q.attempts<2 AND q.expires_at>? AND c.mode='bridge' AND c.expires_at>?
+        ORDER BY q.created_at LIMIT 5) RETURNING id,payload_cipher,lease_id`).bind(now+60000,leaseId,now,now,now).all();
+      return json(200,{jobs:await Promise.all(jobs.results.map(async job=>({id:job.id,leaseId:job.lease_id,...JSON.parse(await unseal(config,job.payload_cipher))})))});
+    }
+    if(route==='/v1/whatsapp/bridge/ack'){
+      if(!['sent','failed'].includes(raw.status)||!/^[-a-f0-9]{36}$/i.test(String(raw.id||''))||!/^[A-Za-z0-9_-]{43}$/.test(String(raw.leaseId||'')))throw failure(400,'Resultado de envio inválido.');
+      const job=await db.prepare('UPDATE whatsapp_outbox SET status=?,lease_until=0,lease_id=NULL WHERE id=? AND status=? AND lease_id=? RETURNING registration_id,code_hash').bind(raw.status,raw.id,'sending',raw.leaseId).first();
+      if(job&&raw.status==='failed'&&reverseConfigured(env))await db.prepare("UPDATE codes SET mode='reverse' WHERE registration_id=? AND hash=? AND mode='bridge'").bind(job.registration_id,job.code_hash).run();return json(200,{ok:true});
+    }
+    return json(404,{message:'Recurso da ponte não encontrado.'});
+  }
   if(route==='/admin'||route==='/admin/'){
     if(method!=='GET')return json(405,{message:'Método não permitido.'},{Allow:'GET'});
     await rate(config,request,'admin',10);let credentials='';
@@ -122,40 +191,50 @@ async function api(request,env,url,config){
     if(raw.noticeAccepted!==true)throw failure(400,'Leia e aceite a utilização dos dados para o cadastro.');
     const call=normalizeCallsign(raw.callsign),id=normalizeRadioId(raw.dmrId),number=normalizePhone(raw.whatsapp),platform=raw.platform==='windows'?'windows':'android',registrationId=crypto.randomUUID();
     await db.prepare('INSERT INTO registrations(id,callsign,dmr_id,phone_cipher,phone_hash,share_phone,platform,created_at,notice_version) VALUES(?,?,?,?,?,?,?,?,?)').bind(registrationId,call,id,await seal(config,number),await hash(config,number),raw.sharePhone===true?1:0,platform,Date.now(),NOTICE_VERSION).run();
-    const available=Boolean(config.downloads[platform]);return json(201,{registrationId,verified:false,downloadAvailable:available,downloadUrl:available?'/download/'+await downloadToken(config,registrationId,platform):null,message:available?'Cadastro recebido. O download está disponível.':'Cadastro recebido. O instalador desta plataforma ainda não foi publicado.'});
+    const available=Boolean(config.downloads[platform]),row=await db.prepare('SELECT * FROM registrations WHERE id=?').bind(registrationId).first();
+    let challenge;
+    if(raw.requestVerification===true)try{challenge=await issueChallenge(config,env,request,row);}catch(error){if(error.status!==429)throw error;challenge={mode:'unavailable',sent:false,expiresInSeconds:600,retryAfterSeconds:error.retryAfterSeconds||60,message:error.message};}
+    return json(201,{registrationId,verified:false,verificationRequired:true,downloadAvailable:available,downloadUrl:null,...(challenge?{challenge}:{}),message:'Cadastro recebido. Confirme o WhatsApp para liberar o download e o ZapChat.'});
   }
   if(route==='/v1/auth/request-code'&&method==='POST'){
     await rate(config,request,'otp',5,600000);const raw=await body(request),row=await db.prepare('SELECT * FROM registrations WHERE id=?').bind(String(raw.registrationId||'')).first();
     if(!row)throw failure(404,'Faça primeiro o cadastro.');
-    const prior=await db.prepare('SELECT * FROM users WHERE callsign=? OR dmr_id=? LIMIT 1').bind(row.callsign,row.dmr_id).first();
-    if(prior&&(prior.phone_hash!==row.phone_hash||prior.callsign!==row.callsign||prior.dmr_id!==row.dmr_id))throw failure(409,'Este indicativo já possui uma conta. Use o número existente ou contacte o responsável.');
-    if(!config.otpUrl||!env.OTP_DELIVERY_TOKEN)throw failure(503,'A verificação do número aguarda configuração do serviço de códigos pelo administrador. O download e o rádio continuam disponíveis.');
-    await rate(config,request,'otp-phone',1,60000,row.phone_hash);
-    const code=otpCode(),codeHash=await hash(config,row.id+':'+code);
-    await db.prepare('INSERT INTO codes(registration_id,hash,expires_at,attempts) VALUES(?,?,?,0) ON CONFLICT(registration_id) DO UPDATE SET hash=excluded.hash,expires_at=excluded.expires_at,attempts=0').bind(row.id,codeHash,Date.now()+600000).run();
-    try{await deliverCode(config,env,request,row,code);}catch(error){await db.prepare('DELETE FROM codes WHERE registration_id=? AND hash=?').bind(row.id,codeHash).run();throw error;}
-    return json(200,{sent:true,expiresInSeconds:600});
+    return json(200,await issueChallenge(config,env,request,row));
+  }
+  if(route==='/v1/auth/status'&&method==='POST'){
+    await rate(config,request,'otp-status',120);const raw=await body(request),token=String(raw.challengeToken||'');if(!/^[A-Za-z0-9_-]{43}$/.test(token))throw failure(400,'Confirmação inválida.');
+    const row=await db.prepare('SELECT * FROM codes WHERE registration_id=? AND challenge_hash=?').bind(String(raw.registrationId||''),await hash(config,'otp-challenge:'+token)).first();
+    if(!row||row.expires_at<=Date.now()||row.attempts>=5)return json(200,{status:'expired',expiresInSeconds:0,retryAfterSeconds:0});
+    if(row.mode==='bridge'&&Date.now()>row.requested_at+90000){const job=await db.prepare('SELECT status,attempts,lease_until FROM whatsapp_outbox WHERE registration_id=? AND code_hash=?').bind(row.registration_id,row.hash).first();if(job?.status!=='sent'&&(!await bridgeConnected(config,env)||job?.attempts>=2&&job.lease_until<Date.now())){await db.prepare("UPDATE codes SET mode='reverse' WHERE registration_id=? AND hash=?").bind(row.registration_id,row.hash).run();row.mode='reverse';}}
+    const plain=JSON.parse(await unseal(config,row.challenge_cipher)),challenge=await challengeView(config,env,row,plain);
+    return json(200,{status:row.mode==='reverse'&&row.reverse_confirmed_at?'confirmed':'pending',expiresInSeconds:challenge.expiresInSeconds,retryAfterSeconds:challenge.retryAfterSeconds,challenge});
   }
   if(route==='/v1/auth/verify'&&method==='POST'){
     await rate(config,request,'verify',20,600000);const raw=await body(request),registrationId=String(raw.registrationId||''),now=Date.now();
-    const attempts=await db.batch([db.prepare('UPDATE codes SET attempts=attempts+1 WHERE registration_id=? AND expires_at>? AND attempts<5 RETURNING hash,expires_at,attempts').bind(registrationId,now),db.prepare('SELECT * FROM registrations WHERE id=?').bind(registrationId)]),codeRow=attempts[0].results[0],row=attempts[1].results[0];
+    if(!/^\d{6}$/.test(String(raw.code||'')))throw failure(400,'Digite os 6 dígitos recebidos.');
+    const pending=await db.prepare('SELECT * FROM codes WHERE registration_id=? AND expires_at>? AND attempts<5').bind(registrationId,now).first();if(!pending)throw failure(401,'Código expirado ou bloqueado. Solicite outro.');
+    if(pending.mode==='reverse'){if(!/^[A-Za-z0-9_-]{43}$/.test(String(raw.challengeToken||''))||!await sameHash(config,'otp-challenge:'+raw.challengeToken,pending.challenge_hash))throw failure(401,'Confirmação inválida.');if(!pending.reverse_confirmed_at)throw failure(409,'Ainda aguardamos a mensagem enviada pelo seu WhatsApp.');}
+    if(!['direct','bridge','reverse'].includes(pending.mode))throw failure(401,'Este código não permite confirmar o número.');
+    const attempts=await db.batch([db.prepare('UPDATE codes SET attempts=attempts+1 WHERE registration_id=? AND hash=? AND expires_at>? AND attempts<5 RETURNING *').bind(registrationId,pending.hash,now),db.prepare('SELECT * FROM registrations WHERE id=?').bind(registrationId)]),codeRow=attempts[0].results[0],row=attempts[1].results[0];
     if(!codeRow||!row)throw failure(401,'Código expirado ou bloqueado. Solicite outro.');
     if(!await sameHash(config,row.id+':'+String(raw.code||''),codeRow.hash))throw failure(401,'Código incorreto.');
     const existing=await db.prepare('SELECT * FROM users WHERE callsign=? OR dmr_id=? LIMIT 1').bind(row.callsign,row.dmr_id).first();
     if(existing&&(existing.phone_hash!==row.phone_hash||existing.callsign!==row.callsign||existing.dmr_id!==row.dmr_id))throw failure(409,'O perfil já está vinculado a outra conta.');
     const token=randomToken(),sessionHash=await hash(config,token),id=existing?.id||crypto.randomUUID();
     let result;try{result=await db.batch([
-      db.prepare(`INSERT INTO users(id,callsign,dmr_id,phone_cipher,phone_hash,share_phone,created_at,verified_at)
-        SELECT ?,r.callsign,r.dmr_id,r.phone_cipher,r.phone_hash,r.share_phone,?,? FROM registrations r JOIN codes c ON c.registration_id=r.id
-        WHERE r.id=? AND c.hash=? AND c.expires_at>? AND c.attempts<=5
-        ON CONFLICT(callsign) DO UPDATE SET share_phone=excluded.share_phone
+      db.prepare(`INSERT INTO users(id,callsign,dmr_id,phone_cipher,phone_hash,share_phone,created_at,verified_at,whatsapp_verified,verification_method)
+        SELECT ?,r.callsign,r.dmr_id,r.phone_cipher,r.phone_hash,r.share_phone,?,?,1,c.mode FROM registrations r JOIN codes c ON c.registration_id=r.id
+        WHERE r.id=? AND c.hash=? AND c.expires_at>? AND c.attempts<=5 AND (c.mode<>'reverse' OR c.reverse_confirmed_at IS NOT NULL)
+        ON CONFLICT(callsign) DO UPDATE SET share_phone=excluded.share_phone,whatsapp_verified=1,verified_at=excluded.verified_at,verification_method=excluded.verification_method
         WHERE users.dmr_id=excluded.dmr_id AND users.phone_hash=excluded.phone_hash RETURNING *`).bind(id,now,now,row.id,codeRow.hash,now),
       db.prepare(`INSERT INTO sessions(hash,user_id,expires_at) SELECT ?,u.id,? FROM users u JOIN registrations r ON u.callsign=r.callsign AND u.dmr_id=r.dmr_id AND u.phone_hash=r.phone_hash
-        JOIN codes c ON c.registration_id=r.id WHERE r.id=? AND c.hash=? AND c.expires_at>? AND c.attempts<=5`).bind(sessionHash,now+30*DAY,row.id,codeRow.hash,now),
-      db.prepare('DELETE FROM codes WHERE registration_id=? AND hash=?').bind(row.id,codeRow.hash)
+        JOIN codes c ON c.registration_id=r.id WHERE r.id=? AND c.hash=? AND c.expires_at>? AND c.attempts<=5 AND (c.mode<>'reverse' OR c.reverse_confirmed_at IS NOT NULL)`).bind(sessionHash,now+30*DAY,row.id,codeRow.hash,now),
+      db.prepare('UPDATE registrations SET whatsapp_verified=1,verified_at=? WHERE id=? AND EXISTS(SELECT 1 FROM sessions WHERE hash=?)').bind(now,row.id,sessionHash),
+      db.prepare('DELETE FROM codes WHERE registration_id=? AND hash=?').bind(row.id,codeRow.hash),
+      db.prepare('DELETE FROM whatsapp_outbox WHERE registration_id=? AND code_hash=?').bind(row.id,codeRow.hash)
     ]);}catch(error){if(String(error.message).includes('UNIQUE constraint'))throw failure(409,'O perfil já está vinculado a outra conta.');throw error;}
     if(!result[0].results.length||!result[1].meta.changes)throw failure(401,'O código já foi utilizado. Solicite outro.');
-    return json(200,{token,user:await publicUser(config,result[0].results[0],true),expiresInDays:30});
+    const available=Boolean(config.downloads[row.platform]);return json(200,{token,user:await publicUser(config,result[0].results[0],true),expiresInDays:30,downloadAvailable:available,downloadUrl:available?'/download/'+await downloadToken(config,row.id,row.platform):null});
   }
   const me=await currentUser(config,request);await rate(config,request,'authenticated',240);
   if(route==='/v1/me'&&method==='GET')return json(200,{user:await publicUser(config,me,true)});
@@ -209,7 +288,7 @@ export async function handleDownload(request,env,url=new URL(request.url)){
     const token=url.pathname.slice(10);if(token.length>1500)throw failure(403,'Link de download inválido.');
     const parts=token.split('.');if(parts.length!==2||!await crypto.subtle.verify('HMAC',config.downloadHmac,unbase64url(parts[1]),encoder.encode(parts[0])))throw failure(403,'Link de download inválido.');
     let data;try{data=JSON.parse(decoder.decode(unbase64url(parts[0])));}catch{throw failure(403,'Link de download inválido.');}
-    if(!data||!Number.isSafeInteger(data.expires)||data.expires<Date.now()||!['android','windows'].includes(data.platform)||!await config.db.prepare('SELECT id FROM registrations WHERE id=?').bind(String(data.id||'')).first())throw failure(403,'O link expirou. Solicite novamente o instalador.');
+    if(!data||!Number.isSafeInteger(data.expires)||data.expires<Date.now()||!['android','windows'].includes(data.platform)||!await config.db.prepare('SELECT id FROM registrations WHERE id=? AND whatsapp_verified=1 AND verified_at IS NOT NULL').bind(String(data.id||'')).first())throw failure(403,'Confirme o WhatsApp para liberar o download ou solicite um novo link.');
     const target=config.downloads[data.platform];if(!target)throw failure(404,'Instalador ainda não publicado.');
     return new Response(null,{status:302,headers:{Location:target,'Cache-Control':'private, no-store','Referrer-Policy':'no-referrer'}});
   }catch(error){return errorResponse(error);}
@@ -223,6 +302,7 @@ export async function cleanup(env){
     config.db.prepare('DELETE FROM rate_limits WHERE expires_at<?').bind(now),
     config.db.prepare('DELETE FROM sessions WHERE expires_at<?').bind(now),
     config.db.prepare('DELETE FROM codes WHERE expires_at<?').bind(now),
+    config.db.prepare('DELETE FROM whatsapp_outbox WHERE expires_at<?').bind(now),
     config.db.prepare('DELETE FROM registrations WHERE created_at<? AND NOT EXISTS(SELECT 1 FROM users WHERE users.callsign=registrations.callsign AND users.phone_hash=registrations.phone_hash)').bind(now-30*DAY)
   ]);
 }

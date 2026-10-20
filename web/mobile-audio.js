@@ -17,7 +17,7 @@
     async configureOperation(operation,console,radioSettings) { if (isAndroid()) return plugin.configureOperation({ operation,...(console?{console}:{}),...(radioSettings?{radioSettings}:{}) }); },
     async bluetoothSpp(options={action:'status'}) { if(isAndroid())return plugin.bluetoothSpp(options); },
     async radioControl(options) { if(isAndroid())return plugin.radioControl(options); },
-    async openWhatsApp(phone) { if(isAndroid())return plugin.openWhatsApp({phone}); },
+    async openWhatsApp(phone,text='') { if(isAndroid())return plugin.openWhatsApp({phone,text}); },
     async requestOperationPermission(alias) { if (isAndroid()) return plugin.requestOperationPermission({ alias }); },
     async batterySettings() { if (isAndroid()) return plugin.batterySettings(); },
     async initialize(onEvent) {

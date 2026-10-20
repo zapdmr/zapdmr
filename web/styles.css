@@ -1,3 +1,17 @@
+.community-dialog .community-otp-step{margin-top:16px;padding:14px;border:1px solid var(--green);border-radius:12px;background:var(--green-soft);display:grid;gap:10px;min-width:0}
+.community-dialog .community-otp-step[hidden],.community-dialog .community-otp-step [hidden]{display:none!important}
+.community-dialog .community-demo-banner[hidden]{display:none!important}
+.community-dialog .community-otp-step h3{margin:0;font-size:16px}
+.community-dialog .community-otp-instructions{margin:0;font-size:12px;line-height:1.5;overflow-wrap:anywhere}
+.community-dialog .community-otp-mode{margin:0;padding:10px;border:1px solid #b77b14;border-radius:8px;background:#fff1c7;color:#5d3c00;font-size:11px;line-height:1.5;font-weight:700}
+.community-dialog #communityOtpCodeRow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end;margin:0}
+.community-dialog #communityOtpCodeRow label{margin:0;min-width:0}
+.community-dialog #communityOtp{font-size:24px;letter-spacing:.22em;font-variant-numeric:tabular-nums;min-height:48px}
+.community-dialog #communityOtpTimer{margin:0;font-variant-numeric:tabular-nums}
+.community-dialog #communityOtpWhatsApp{min-height:44px;white-space:normal;width:100%}
+.community-dialog #communityCorrectPhone{justify-self:start}
+.community-dialog #communityAccountStatus{overflow-wrap:anywhere}
+@media(max-width:650px){.community-dialog #communityOtpCodeRow{grid-template-columns:minmax(0,1fr)}.community-dialog #communityOtpCodeRow button{width:100%;min-height:44px}.community-dialog .community-otp-step{padding:12px}}
 :root {
   color-scheme: light;
   --green: #128c55; --bright: #25d366; --green-soft: #e8f8ef; --green-text: #096640;
