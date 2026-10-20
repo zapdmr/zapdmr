@@ -65,7 +65,7 @@ async function openWindow() {
     if(['F7','F8'].includes(scanKey)){scanShortcut=scanKey;globalShortcut.register(scanShortcut,()=>window.webContents.send('zapdmr-scan-key'));}
     return { shortcutRegistered };
   });
-  window.webContents.setUserAgent(window.webContents.getUserAgent()+' ZapDMR/1.4.1');
+  window.webContents.setUserAgent(window.webContents.getUserAgent()+' ZapDMR/1.4.2');
   await window.loadURL(localServer.url);
 }
 app.whenReady().then(openWindow);

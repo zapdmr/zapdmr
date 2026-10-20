@@ -1,15 +1,1 @@
-{
-  "name": "zapdmr-cloudflare",
-  "version": "1.4.1",
-  "private": true,
-  "type": "module",
-  "license": "GPL-3.0-only",
-  "scripts": {
-    "dev": "wrangler dev",
-    "build": "wrangler deploy --dry-run --outdir build",
-    "deploy": "wrangler deploy"
-  },
-  "devDependencies": {
-    "wrangler": "4.151.2"
-  }
-}
+{"name":"zapdmr-cloudflare","version":"1.4.2","private":true,"type":"module","license":"GPL-3.0-only","scripts":{"dev":"wrangler dev","build":"wrangler deploy --dry-run --outdir build","deploy":"wrangler deploy"},"devDependencies":{"wrangler":"4.151.2"}}
