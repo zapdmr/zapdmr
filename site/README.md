@@ -2,9 +2,9 @@
 
 Portal publicado em **[www.zapdmr.com.br](https://www.zapdmr.com.br)**, com Cloudflare Workers Free e banco D1. A homepage foi aberta por HTTPS no navegador em 19/10/2026. O domínio sem `www` redireciona para o endereço canônico.
 
-O estado da API também foi confirmado por HTTPS direto fora do sandbox restrito: `/v1/status` respondeu HTTP 200 com HSTS `max-age=31536000`, sem ignorar a validação de certificado.
+Homepage, `/healthz`, `/v1/status`, privacidade e termos responderam HTTP 200 por HTTPS direto fora do sandbox restrito, sem ignorar a validação de certificado. O estado da API confirmou os downloads disponíveis nas duas plataformas; os três assets APK, EXE e fontes também responderam HTTP 200 a HEAD no GitHub. HSTS está ativo com `max-age=31536000`.
 
-**Publicação ainda em conclusão:** os instaladores foram enviados para uma Release em rascunho no GitHub, mas ela ainda não está publicada e as URLs de download do Worker permanecem vazias. O provedor de entrega de códigos também não foi configurado; novos usuários ainda não conseguem confirmar o telefone ou entrar no ZapChat.
+Os instaladores e o código-fonte estão publicados na [pré-release v1.3.0](https://github.com/zapdmr/zapdmr/releases/tag/v1.3.0). As URLs reais dos arquivos, tamanhos e hashes dos instaladores estão configurados no Worker. **A confirmação de telefone ainda depende do provedor de entrega de códigos:** novos usuários não conseguem confirmar o número ou entrar no ZapChat enquanto esse serviço não for ativado.
 
 O material de referência em `C:\ZapDMR_New\Site` continha README e uma demonstração HTML. Esta versão contém o servidor real e os ficheiros públicos, com recursos locais e sem dependências de CDN.
 
@@ -12,7 +12,7 @@ O material de referência em `C:\ZapDMR_New\Site` continha README e uma demonstr
 
 O responsável escolheu a opção gratuita. A pasta [`cloudflare/`](cloudflare/README.md) contém a implantação em Workers + D1. O Worker está publicado, o banco remoto foi criado e inicializado, os três segredos de produção foram configurados e a zona DNS está ativa na Cloudflare. Não é necessário contratar o servidor Node para essa opção.
 
-O responsável é **Rizandro Cesar da Silva**, com contacto público **rizandro@gmail.com**. O repositório público [zapdmr/zapdmr](https://github.com/zapdmr/zapdmr) foi criado. APK, EXE, fontes e SHA-256 estão anexados ao rascunho da pré-release `v1.3.0`; falta publicá-la e ligar seus endereços ao portal. Os arquivos da Release serão públicos também fora do formulário. A entrega de códigos é uma configuração separada, necessária para confirmar números e liberar novas contas da comunidade.
+O responsável é **Rizandro Cesar da Silva**, com contacto público **rizandro@gmail.com**. O repositório público [zapdmr/zapdmr](https://github.com/zapdmr/zapdmr) contém o código e a documentação de autenticação. A pré-release `v1.3.0` foi publicada com APK, EXE, fontes e SHA-256. Os arquivos da Release são públicos também fora do formulário. A entrega de códigos é uma configuração separada, necessária para confirmar números e liberar novas contas da comunidade.
 
 Consulte a [arquitetura de autenticação](AUTENTICACAO.md) e o [registro da verificação de 19/10/2026](VERIFICACAO-2026-10-19.md) para componentes, fluxo de credenciais e limites observados.
 
@@ -82,7 +82,7 @@ Este pacote não cria contas em provedores de SMS/Meta, não inclui credenciais 
 
 ## Instaladores
 
-Na hospedagem Cloudflare atual, os arquivos serão servidos por GitHub Releases. Depois de publicar o rascunho `v1.3.0`, preencha `DOWNLOAD_ANDROID_URL`, `DOWNLOAD_WINDOWS_URL` e `SOURCE_URL` com os endereços reais dos assets e publique a configuração do Worker. Consulte o procedimento em [`cloudflare/README.md`](cloudflare/README.md).
+Na hospedagem Cloudflare atual, os arquivos são distribuídos pela [pré-release v1.3.0 do GitHub](https://github.com/zapdmr/zapdmr/releases/tag/v1.3.0). `DOWNLOAD_ANDROID_URL`, `DOWNLOAD_WINDOWS_URL` e `SOURCE_URL` já contêm os endereços reais dos assets; os instaladores também têm tamanho e SHA-256 registrados na configuração. Consulte o procedimento de atualização em [`cloudflare/README.md`](cloudflare/README.md).
 
 Para a alternativa Node/VPS, coloque os artefactos finais com os nomes:
 
@@ -116,6 +116,6 @@ O aplicativo 1.3.0 atual continua compatível com `messages` e `after`, mas não
 
 ## Antes do lançamento
 
-Os textos de privacidade e termos descrevem esta implementação e já identificam o responsável e o contacto confirmados. Publique os instaladores, configure suas URLs, ative e valide a entrega de códigos e revise os procedimentos de atendimento/eliminação antes de anunciar a comunidade como operacional. O armazenamento é cifrado no servidor, **não ponta a ponta**. A verificação física de áudio, acessórios, GPS e a validação da entrega do código dependem dos dispositivos e da infraestrutura.
+Os textos de privacidade e termos descrevem esta implementação e já identificam o responsável e o contacto confirmados. Ative e valide a entrega de códigos e revise os procedimentos de atendimento/eliminação antes de anunciar a comunidade como operacional. O armazenamento é cifrado no servidor, **não ponta a ponta**. A verificação física de áudio, acessórios, GPS, conversa entre duas instalações reais e entrega do código dependem dos dispositivos e da infraestrutura.
 
 Referências: [WhatsApp Click to Chat](https://faq.whatsapp.com/5913398998672934/?locale=pt_BR), [APRS-IS](https://www.aprs-is.net/Connecting.aspx), [política de mosaicos OpenStreetMap](https://operations.osmfoundation.org/policies/tiles/).

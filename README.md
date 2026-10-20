@@ -15,6 +15,7 @@ Os arquivos são distribuídos como assets da Release, sem guardar executáveis 
 | --- | --- |
 | Android | [ZapDMR-Android-1.3.0.apk](https://github.com/zapdmr/zapdmr/releases/download/v1.3.0/ZapDMR-Android-1.3.0.apk) |
 | Windows x64 | [ZapDMR-Setup.exe](https://github.com/zapdmr/zapdmr/releases/download/v1.3.0/ZapDMR-Setup.exe) |
+| Fontes do portal Cloudflare | [ZapDMR-Site-Cloudflare-1.3.0.zip](https://github.com/zapdmr/zapdmr/releases/download/v1.3.0/ZapDMR-Site-Cloudflare-1.3.0.zip) |
 | Código-fonte correspondente completo do aplicativo | [ZapDMR-Android-1.3.0-source.zip](https://github.com/zapdmr/zapdmr/releases/download/v1.3.0/ZapDMR-Android-1.3.0-source.zip) |
 
 Consulte os hashes SHA-256 anexados à Release antes da instalação. Os assets públicos do GitHub podem ser baixados diretamente sem preencher o formulário do portal.
@@ -52,7 +53,7 @@ Veja a explicação dos componentes, fluxo de pedidos, credenciais e tokens em [
 | `scripts/` | Scripts de compilação, empacotamento e verificações existentes |
 | `docs/` | Notas e arquitetura |
 
-Este histórico oferece os fontes textuais do aplicativo e do site para leitura e manutenção. Ele **não é, isoladamente, o pacote completo de compilação**: binários e imagens raster do aplicativo, ícones de bandeiras, bibliotecas nativas compiladas, Gradle Wrapper JAR e árvores de dependências nativas de terceiros não estão incluídos. Use o [arquivo de código-fonte correspondente completo da Release](https://github.com/zapdmr/zapdmr/releases/download/v1.3.0/ZapDMR-Android-1.3.0-source.zip) para a distribuição do aplicativo, com suas instruções e componentes. As fontes do site mantidas aqui podem incluir correções posteriores ao pacote do aplicativo 1.3.0.
+Este histórico oferece os fontes textuais do aplicativo e do site para leitura e manutenção. Ele **não é, isoladamente, o pacote completo de compilação**: binários, imagens raster, ícones de bandeiras, bibliotecas nativas compiladas, Gradle Wrapper JAR e árvores de dependências nativas de terceiros não estão incluídos. Use o [arquivo de código-fonte correspondente completo da Release](https://github.com/zapdmr/zapdmr/releases/download/v1.3.0/ZapDMR-Android-1.3.0-source.zip) para a distribuição do aplicativo, com suas instruções e componentes. As fontes do site mantidas aqui podem incluir correções posteriores ao pacote do aplicativo 1.3.0.
 
 Configurações específicas da máquina, bancos privados, números cadastrados, conversas, tokens, credenciais de publicação e chaves de assinatura não fazem parte do repositório. Os arquivos de exemplo não contêm os segredos de produção.
 

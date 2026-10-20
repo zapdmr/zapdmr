@@ -2,9 +2,9 @@
 
 Este pacote prepara o portal `www.zapdmr.com.br` e a API da comunidade para Cloudflare Workers, usando D1 como banco. Os instaladores ficam em GitHub Releases. O servidor Node de `../server.mjs` continua sendo uma alternativa de hospedagem; ele não é o processo executado no Worker.
 
-**Estado em 19/10/2026:** o Worker está publicado em [www.zapdmr.com.br](https://www.zapdmr.com.br), com homepage HTTPS conferida no navegador. O banco D1 remoto e os três segredos de produção estão configurados. O domínio sem `www` redireciona com HTTP 308 para o endereço canônico em requisições GET/HEAD. A pré-release `v1.3.0` está em rascunho no GitHub com quatro assets enviados; falta publicá-la e preencher as URLs no Worker. A confirmação do número continua desativada por falta do provedor de códigos. O responsável é Rizandro Cesar da Silva, com contacto de privacidade em rizandro@gmail.com.
+**Estado em 19/10/2026:** o Worker está publicado em [www.zapdmr.com.br](https://www.zapdmr.com.br), com homepage HTTPS conferida no navegador. O banco D1 remoto e os três segredos de produção estão configurados. O domínio sem `www` redireciona com HTTP 308 para o endereço canônico em requisições GET/HEAD. A [pré-release v1.3.0](https://github.com/zapdmr/zapdmr/releases/tag/v1.3.0) está publicada com APK, EXE, fontes e SHA-256, e as URLs reais já estão preenchidas em `wrangler.jsonc`. A confirmação do número continua desativada por falta do provedor de códigos. O responsável é Rizandro Cesar da Silva, com contacto de privacidade em rizandro@gmail.com.
 
-Também foram conferidos no navegador `/healthz` (`ok: true`, versão `1.3.0`), `/v1/status` (cadastro ativo, confirmação e downloads ainda indisponíveis) e a página de privacidade com os dados corretos. Uma consulta HTTPS direta fora do sandbox restrito confirmou HTTP 200 em `/v1/status`, o mesmo JSON e HSTS com `max-age=31536000`. As falhas TLS anteriores ocorreram no ambiente restrito; a validação de certificado permaneceu ativa.
+Também foram conferidos no navegador `/healthz` (`ok: true`, versão `1.3.0`), `/v1/status` e a página de privacidade com os dados corretos. Após publicar as URLs, consultas HTTPS diretas fora do sandbox restrito confirmaram HTTP 200 em `/`, `/healthz`, `/v1/status`, `/privacidade/` e `/termos/`, com HSTS `max-age=31536000`. O estado da API informou cadastro ativo, confirmação desativada e downloads disponíveis nas duas plataformas com os hashes configurados. HEAD dos assets APK, EXE e fontes no GitHub retornou HTTP 200, com 7.336.566, 160.696.832 e 50.899.596 bytes, respectivamente. As falhas TLS anteriores ocorreram no ambiente restrito; a validação de certificado permaneceu ativa. O envio real do formulário e o fluxo de confirmação/chat entre dispositivos continuam sem validação remota completa.
 
 ### Implantação existente
 
@@ -13,7 +13,7 @@ Também foram conferidos no navegador `/healthz` (`ok: true`, versão `1.3.0`), 
 | Worker | `zapdmr-community` |
 | Endereço alternativo | `https://zapdmr-community.rizandro.workers.dev` |
 | Domínios personalizados | `www.zapdmr.com.br` e `zapdmr.com.br` |
-| Versão publicada | `6925b2f9-aca2-4f20-97f6-71e86da604f3` |
+| Versão publicada | `56d38b61-486a-4371-a028-4c7981198b47` |
 | D1 | `zapdmr-community`, binding `DB`, ID `6f272e21-de29-40a1-8bfd-801e00d2a95a` |
 | Esquema remoto | 17 comandos aplicados |
 | Zona DNS | `22bdf6d6691d98a8e3e67892ebe21434`, ativa no plano Free |
@@ -57,14 +57,14 @@ As cotas diárias do D1 reiniciam às 00:00 UTC. Ao ultrapassar leitura ou escri
 
 **ZapChat exige atenção:** como exemplo de dimensionamento, uma consulta a cada 25 segundos gera cerca de 3.456 requisições por usuário conectado durante 24 horas. Só 29 usuários nesse ritmo já ultrapassariam 100.000 requisições, antes de cadastros, autenticação e outras chamadas. O cálculo é ilustrativo: reconexões, mensagens e a implementação de polling mudam o consumo. Suspenda consultas quando a tela não estiver ativa, aplique espera progressiva em erros e acompanhe requisições e linhas lidas no painel. A faixa gratuita serve para iniciar; não é uma promessa de escala ilimitada sem custo.
 
-## 2. Publicar os instaladores no GitHub
+## 2. Instaladores publicados no GitHub
 
 1. Use o repositório público [zapdmr/zapdmr](https://github.com/zapdmr/zapdmr), já criado na conta autorizada.
-2. Conclua a pré-release em rascunho `v1.3.0`. APK, instalador Windows, ZIP de código-fonte correspondente e SHA-256 já foram enviados como quatro assets. Mantenha GPL e os avisos de componentes no pacote de fontes.
-3. Publique a Release e copie o endereço de cada asset. Prefira URLs de uma versão específica, evitando trocar um instalador silenciosamente.
-4. Coloque essas URLs nas variáveis `DOWNLOAD_ANDROID_URL`, `DOWNLOAD_WINDOWS_URL` e `SOURCE_URL` do Worker e publique a configuração. Elas permanecem vazias no estado registrado aqui.
+2. A pré-release pública `v1.3.0` contém quatro assets: APK, instalador Windows, ZIP de código-fonte correspondente e SHA-256. Mantenha GPL e os avisos de componentes no pacote de fontes.
+3. O commit/etiqueta `65d900b4e0e02a65dea17fcc18b41bf54497ca76` contém 128 arquivos de código e documentação revisados para publicação, incluindo a explicação de autenticação.
+4. As variáveis `DOWNLOAD_ANDROID_URL`, `DOWNLOAD_WINDOWS_URL` e `SOURCE_URL` já apontam para os assets publicados. Tamanho e SHA-256 dos instaladores também estão configurados. Em atualizações futuras, publique uma versão específica e atualize essas variáveis antes de republicar o Worker.
 
-Formato esperado após a publicação — confirme os nomes reais dos assets antes de usar. Estes exemplos não afirmam que a Release já esteja disponível:
+URLs configuradas dos assets publicados:
 
 ```text
 https://github.com/zapdmr/zapdmr/releases/download/v1.3.0/ZapDMR-Android-1.3.0.apk
@@ -160,13 +160,12 @@ A zona está ativa no plano Free com os servidores DNS indicados acima. Os dois 
 4. Decida também o destino de `zapdmr.com.br` sem `www`: use um domínio personalizado adicional compatível com o Worker ou um redirecionamento para o endereço canônico. Registrar somente `www` não configura automaticamente todos os outros nomes.
 5. Aguarde o domínio/certificado ficarem ativos e confira homepage, termos, privacidade, `/v1/status` e os arquivos das duas plataformas. Confirme que o app usa a origem HTTPS definitiva. A API privada não deve ser colocada em cache público.
 
-A verificação HTTPS da homepage confirma sua disponibilidade no momento observado; ainda é necessário conferir o fluxo dos instaladores após publicar a Release e validar a entrega de códigos antes de anunciar a comunidade operacional. [Domínios personalizados do Workers](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/).
+A verificação HTTPS confirma as páginas públicas, saúde, estado da API e disponibilidade dos assets no momento observado. A Release está publicada e suas URLs ativas no Worker. Valide o envio do formulário, a entrega de códigos e o uso em dispositivos reais antes de anunciar a comunidade operacional. [Domínios personalizados do Workers](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/).
 
-## 6. Pendências para concluir a publicação
+## 6. Ativação da comunidade e validação em dispositivos
 
-- Publicar o rascunho da pré-release `v1.3.0` de `zapdmr/zapdmr`, com os quatro assets já enviados.
-- Preencher e publicar as URLs reais dos três downloads; conferir downloads e fonte sem cadastro no domínio público.
-- Provedor/adaptador de códigos definido, suas credenciais e entrega operacional; necessário para liberar novos usuários na comunidade.
+- **Único bloqueio funcional restante para novas contas da comunidade:** definir o provedor/adaptador de códigos, configurar suas credenciais e validar a entrega real. Sem essa etapa, novos usuários não conseguem confirmar o telefone, acessar o diretório ou iniciar ZapChat.
+- O envio remoto do formulário e o redirecionamento assinado do portal ainda precisam ser validados como fluxo completo. A API já informa os downloads disponíveis e os assets públicos APK/EXE/fontes responderam HTTP 200 a HEAD.
 - Confirmar a origem HTTPS definitiva no app e validar o fluxo entre duas instalações reais após ativar o provedor.
 - O Worker pode levar até 25 segundos para devolver uma mensagem nova numa consulta pendente. O app 1.3.0 ainda não consome o canal separado `receipts`; leituras aparecem ao sincronizar novamente o histórico.
 
