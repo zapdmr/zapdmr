@@ -30,7 +30,7 @@ function Add-SourceTree([string]$path, [string]$prefix) {
     }
 }
 try {
-    foreach ($name in @('package.json','package-lock.json','capacitor.config.json','tsconfig.server.json','LICENSE','THIRD_PARTY_NOTICES.md','README.md','.gitignore')) {
+    foreach ($name in @('package.json','package-lock.json','capacitor.config.json','tsconfig.server.json','LICENSE','THIRD_PARTY_NOTICES.md','README.md','AGENTS.md','.gitignore')) {
         Add-SourceFile (Join-Path $projectRoot $name) $name
     }
     foreach ($name in @('web','src','electron','scripts','docs','android')) { Add-SourceTree (Join-Path $projectRoot $name) $name }

@@ -4,7 +4,11 @@
     const explicit=['hbp','odtp'].includes(value.radioProtocol);
     const legacyPort=Number(value.masterPort)||62031;
     const radioProtocol=explicit?value.radioProtocol:value.serverType==='other'||![62030,62031,54006].includes(legacyPort)?'hbp':'odtp';
-    return {...value,radioProtocol,masterPort:!explicit&&radioProtocol==='odtp'&&[62030,62031].includes(legacyPort)?54006:legacyPort};
+    const serverType=value.serverType==='other'?'other':'brandmeister';
+    return {...value,serverType,radioProtocol,
+      masterHost:String(value.masterHost||'').trim()||(serverType==='brandmeister'?'7242.master.brandmeister.network':''),
+      masterPort:!explicit&&radioProtocol==='odtp'&&[62030,62031].includes(legacyPort)?54006:legacyPort,
+      autoConnectOnStartup:value.autoConnectOnStartup!==false,autoReconnect:value.autoReconnect!==false};
   }
   function reception(gateway={},settings={},target=0) {
     const protocol=gateway.protocol||settings.radioProtocol||'hbp';

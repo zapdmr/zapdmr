@@ -2,7 +2,7 @@ const $ = (selector) => document.querySelector(selector);
 const mobileAudio = window.ZapDMRMobileAudio;
 const catalogActivity = window.ZapDMRTalkgroups;
 const defaultFrequencyHz = '433500000';
-const defaults = { callsign: '', dmrId: '', essid: '02', rxFrequencyHz: defaultFrequencyHz, txFrequencyHz: defaultFrequencyHz, masterHost: '', masterPort: 62031, serverType: 'brandmeister', staticTalkgroups: '', locationName: '', latitude: '', longitude: '', defaultSlot: 1, theme: 'auto', autoConnectOnStartup: false, autoReconnect: false, totLimitSeconds: 180, totWarningSeconds: 10, totVisualAlert: true, totSoundAlert: true, txGainPercent: 100, rxVolumePercent: 100, selectedTalkgroupId: 724, favorites: [724] };
+const defaults = window.ZapDMRProtocol.normalize({ callsign: '', dmrId: '', essid: '02', rxFrequencyHz: defaultFrequencyHz, txFrequencyHz: defaultFrequencyHz, masterHost: '', masterPort: 62031, serverType: 'brandmeister', staticTalkgroups: '', locationName: '', latitude: '', longitude: '', defaultSlot: 1, theme: 'auto', autoConnectOnStartup: true, autoReconnect: true, totLimitSeconds: 180, totWarningSeconds: 10, totVisualAlert: true, totSoundAlert: true, txGainPercent: 100, rxVolumePercent: 100, selectedTalkgroupId: 724, favorites: [724] });
 let settings = { ...defaults };
 let groups = window.ZapDMRCatalog.bundled;
 let apiAvailable = false;
@@ -112,7 +112,7 @@ function renderProfiles() {
 }
 
 function applySettingsToForm(value) {
-  settings = window.ZapDMRProtocol.normalize({ ...defaults, ...value });
+  settings = { ...defaults, ...window.ZapDMRProtocol.normalize(value) };
   settings.favorites = Array.isArray(settings.favorites) ? [...new Set(settings.favorites.map(Number).filter(Number.isInteger))] : [724];
   activeProfileId = value.profileId || activeProfileId;
   if (!mobileAudio?.isAndroid?.()) {
@@ -834,7 +834,7 @@ async function handleMobilePttDown(event) {
 }
 
 async function init() {
-  try { settings = { ...defaults, ...JSON.parse(localStorage.getItem('zapdmr-settings') || '{}') }; } catch {}
+  try { settings = { ...defaults, ...window.ZapDMRProtocol.normalize(JSON.parse(localStorage.getItem('zapdmr-settings') || '{}')) }; } catch {}
   settings.favorites = Array.isArray(settings.favorites) ? settings.favorites.map(Number) : [724];
   try { groups = window.ZapDMRCatalog.merge(window.ZapDMRCatalog.bundled, JSON.parse(localStorage.getItem('zapdmr-custom-talkgroups') || '[]')); } catch { groups = window.ZapDMRCatalog.bundled; }
   applySettingsToForm(settings); renderCategories(); renderGroups();
@@ -866,7 +866,7 @@ async function init() {
   }
   renderAudioMeter();
   try { settings = { ...defaults, ...JSON.parse(localStorage.getItem('zapdmr-settings') || '{}') }; } catch { /* Use defaults. */ }
-  if (androidAudioAvailable && mobileSecureConfig.settings) settings = { ...settings, ...mobileSecureConfig.settings };
+  if (androidAudioAvailable && mobileSecureConfig.settings) settings = { ...settings, ...window.ZapDMRProtocol.normalize(mobileSecureConfig.settings) };
   if(androidAudioAvailable&&!localStorage.getItem('zapdmr-android-essid-separated')){
     if(!settings.essid||['01','02'].includes(settings.essid))settings.essid='03';
     await mobileAudio.saveRadioConfig({settings,customTalkgroups:mobileSecureConfig.customTalkgroups||[],hotspotPassword:mobileSecureConfig.hotspotPassword||''});
@@ -1007,7 +1007,8 @@ $('#serverType').onchange = (event) => {
   const other = event.target.value === 'other';
   $('#otherServerFields').hidden = !other;
   $('#bmMasterPickerLabel').hidden = other;
-  if (!other && !$('#masterPort').value) $('#masterPort').value = '62031';
+  if (!other && !$('#masterPort').value) $('#masterPort').value = $('#radioProtocol').value==='odtp'?'54006':'62031';
+  if (!other && !$('#master').value.trim()) $('#master').value='7242.master.brandmeister.network';
 };
 $('#bmMasterSelect').onchange = (event) => {
   if (event.target.value) $('#master').value = event.target.value;
@@ -1239,8 +1240,9 @@ $('#settingsForm').onsubmit = async (event) => {
     $('#password').value = '';
     updatePasswordHint();
     toast(mobileAudio?.isAndroid?.()
-      ? 'Perfil guardado com proteção Android. O APK usa ligação HBP direta quando ligar ao master.'
-      : apiAvailable ? 'Perfil guardado. Pode iniciar a ligação HBP.' : 'Perfil guardado neste dispositivo. Inicie o servidor para ligar à BrandMeister.');
+      ? 'Perfil guardado com proteção Android. Protocolo '+settings.radioProtocol.toUpperCase()+'.'
+      : apiAvailable ? 'Perfil guardado. Protocolo '+settings.radioProtocol.toUpperCase()+'.' : 'Perfil guardado neste dispositivo. Inicie o servidor para ligar à BrandMeister.');
+    if(settings.autoConnectOnStartup&&passwordConfigured&&!gatewayStatus.connected&&!automationStatus.reconnecting&&!['resolving','waiting-login','waiting-auth','waiting-config','reconnecting'].includes(gatewayStatus.state)&&window.ZapDMRCommunity?.isComplete())await $('#connect').onclick();
   } catch (error) { toast(error.message || 'Não foi possível guardar a configuração.'); }
 };
 

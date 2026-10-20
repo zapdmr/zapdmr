@@ -47,9 +47,9 @@ export interface Talkgroup {
 }
 export const DEFAULT_SETTINGS: AppSettings = {
   callsign: '', dmrId: '', essid: '02', rxFrequencyHz: DEFAULT_HOTSPOT_FREQUENCY_HZ,
-  txFrequencyHz: DEFAULT_HOTSPOT_FREQUENCY_HZ, masterHost: '', masterPort: 62031,
-  serverType: 'brandmeister', staticTalkgroups: '', locationName: '', latitude: '', longitude: '', defaultSlot: 1, theme: 'auto',
-  autoConnectOnStartup: false, autoReconnect: false,
+  txFrequencyHz: DEFAULT_HOTSPOT_FREQUENCY_HZ, masterHost: '7242.master.brandmeister.network', masterPort: 54006,
+  serverType: 'brandmeister', radioProtocol: 'odtp', staticTalkgroups: '', locationName: '', latitude: '', longitude: '', defaultSlot: 1, theme: 'auto',
+  autoConnectOnStartup: true, autoReconnect: true,
   maxReconnectAttempts: 5, autoOpenTalkgroup: false, unlinkPreviousTalkgroup: false,
   sendLocationOnConnect: false, totEnabled: true,
   totLimitSeconds: 180, totWarningSeconds: 10, totVisualAlert: true, totSoundAlert: true,
