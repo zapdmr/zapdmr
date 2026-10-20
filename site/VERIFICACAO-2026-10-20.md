@@ -72,7 +72,7 @@ f46853ae009140533c0462f94e00381e8ac48fc384efd912d01f40e2c8404af1  ZapDMR-Site-Cl
 
 As URLs e os hashes da versão 1.3.1 estão ativos no Worker. A disponibilidade dos assets e da API e a liberação do link pelo fluxo real de OTP estão confirmadas. Estes registros foram atualizados depois do empacotamento, sem regenerar ou substituir os ZIPs originais publicados.
 
-A correção do site/ponte será adicionada à mesma Release como `ZapDMR-Site-Cloudflare-1.3.1-r2.zip`, com seu arquivo de hashes, usando `package-site-cloudflare.ps1 -Revision r2`. Os assets originais 1.3.1 e seus hashes acima serão preservados.
+A correção do site/ponte foi adicionada à mesma Release como `ZapDMR-Site-Cloudflare-1.3.1-r2.zip`, com seu arquivo de hashes, usando `package-site-cloudflare.ps1 -Revision r2`. Os assets originais 1.3.1 e seus hashes acima foram preservados. O pacote r2 respondeu HTTP 200 (225.777 bytes), com SHA-256 `fd1d70e8c01fb7a04bba0c9bc20331432816684f4b560ef2294c1fab586737d6`.
 
 O firmware autorizado é incluído nos pacotes locais e pode ser instalado no primeiro arranque ou restaurado por Ativar / Reparar vocoder sem internet. Esta revisão não comprovou RX/TX físico em aparelho.
 

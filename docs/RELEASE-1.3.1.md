@@ -47,11 +47,11 @@ O firmware autorizado acompanha os pacotes locais e pode preparar ou reparar o v
 
 ## Limites da revisão
 
-- Não houve novo teste unitário ou smoke funcional do fluxo OTP, fila e ponte. Os 38 checks isolados de 19/10 pertencem à implementação anterior.
-- Entrega/recepção real de OTP, liberação do download após confirmação, ativação do perfil e conversa entre duas instalações ainda precisam de observação positiva.
+- Não foi executada nova bateria automatizada do fluxo OTP, fila e ponte; o fluxo real manual está registrado abaixo. Os 38 checks isolados de 19/10 pertencem à implementação anterior.
+- Após a correção r2, o titular recebeu e validou um OTP real no portal; o número foi confirmado e o download Android liberado. A conclusão do arquivo, a instalação, a ativação do perfil no app e conversa entre duas instalações ainda não foram verificadas.
 - O cliente 1.3.1 não consome o canal separado de recibos ao vivo; leituras são atualizadas ao sincronizar novamente o histórico. O polling de mensagens pode demorar até 25 segundos e depende das cotas de Workers/D1.
 - Esta revisão não comprovou RX/TX físico, Bluetooth, GPS ou chamadas privadas em todos os aparelhos e masters.
 
-Para a validação real pendente, o formulário do portal foi preenchido na aba aberta. O titular ainda precisa ler e aceitar o aviso de privacidade, selecionar **Continuar** e digitar o código recebido no próprio WhatsApp. Esses atos não foram executados como se fossem uma confirmação automática do usuário.
+O titular leu e aceitou o aviso, iniciou o cadastro e digitou o código recebido diretamente no portal. O resultado foi WhatsApp confirmado, registro e usuário com `whatsapp_verified=1`, uma sessão ativa e o botão Baixar Android liberado. O código e o token não foram lidos ou registrados pela revisão. A correção do site/ponte está publicada no pacote adicional `ZapDMR-Site-Cloudflare-1.3.1-r2.zip`.
 
 Documentação: [confirmação WhatsApp](../site/WHATSAPP-OTP.md), [ponte local](../site/whatsapp-bridge/README.md), [autenticação](../site/AUTENTICACAO.md) e [registro de verificação de 20/10](../site/VERIFICACAO-2026-10-20.md).

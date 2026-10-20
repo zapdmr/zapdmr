@@ -37,7 +37,7 @@ Em 20/10/2026, a correção da API foi publicada no deploy Cloudflare `29f0793e-
 
 Esse fluxo comprova recebimento humano, digitação do código pelo titular, perfil verificado e download liberado. Não foi registrado recibo automático `delivered` para o envio a si mesmo; o diagnóstico da ponte continua `submitted`. Também não foram comprovados o término do download do arquivo, instalação do APK, ativação da comunidade dentro do aplicativo ou conversa entre duas contas. Essas etapas e evidências permanecem distintas.
 
-O pacote do site com sufixo `1.3.1-r2` será adicionado à Release para conservar essa correção e sua documentação, sem substituir os assets originais 1.3.1. O empacotamento usa `package-site-cloudflare.ps1 -Revision r2`; a presença do ZIP não substitui a validação real do cadastro.
+O pacote do site com sufixo `1.3.1-r2` foi adicionado à Release para conservar essa correção e sua documentação, sem substituir os assets originais 1.3.1. O empacotamento usa `package-site-cloudflare.ps1 -Revision r2`; a presença do ZIP não substitui a validação real do cadastro.
 
 O painel local somente controla a ponte em loopback. A autenticação dos endpoints de fila, heartbeat, ACK e recepção usa `Authorization: Bearer <WHATSAPP_WEBHOOK_TOKEN>`. Não publique essa porta, o token, os arquivos DPAPI ou o QR. O envio externo não tem garantia de exatamente uma entrega; os leases, ACKs e a deduplicação local reduzem mensagens repetidas.
 

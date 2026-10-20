@@ -48,7 +48,7 @@ A API foi publicada no deploy `29f0793e-185e-44ba-9e83-c52491cc725a`. A ponte re
 
 O fluxo real de recebimento humano, validação do código e liberação do download foi confirmado. O estado técnico permanece `submitted`, sem recibo automático de entrega registrado para esse envio a si mesmo. Não foram comprovados o término do download, instalação do APK, ativação da comunidade no app, conversa entre duas contas ou RX/TX físico de rádio.
 
-O pacote do site `1.3.1-r2` será anexado à Release, preservando os assets originais. Esta atualização corrige a entrega e o diagnóstico da ponte; não altera os aplicativos já publicados nem transforma o pareamento em validação de usuário.
+O pacote do site `1.3.1-r2` foi anexado à Release, preservando os assets originais. Esta atualização corrige a entrega e o diagnóstico da ponte; não altera os aplicativos já publicados nem transforma o pareamento em validação de usuário.
 
 ## Referências upstream consultadas
 

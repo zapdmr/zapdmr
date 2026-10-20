@@ -6,7 +6,7 @@ O portal está publicado em **[www.zapdmr.com.br](https://www.zapdmr.com.br)**, 
 
 O frontend e a API 1.3.1 com confirmação de WhatsApp foram publicados no Worker. A migração OTP foi aplicada ao D1 remoto. Os instaladores locais `release/ZapDMR-Android-1.3.1.apk` e `release/ZapDMR-Windows-1.3.1.exe` foram gerados. A configuração de URLs de download deve acompanhar a Release realmente publicada; enquanto ela apontar para v1.3.0, esse é o instalador distribuído pelo portal.
 
-A ponte WhatsApp local está aberta em **http://127.0.0.1:4193**, com QR disponível para o responsável vincular o número oficial **+55 43 99674-1200**. O pareamento humano e a primeira entrega real ainda estão pendentes. Um QR gerado ou `verificationConfigured:true` não comprova envio nem posse de um número.
+A ponte WhatsApp local está conectada ao número oficial **+55 43 99674-1200**, com painel em **http://127.0.0.1:4193**. Após a correção r2, o responsável confirmou o recebimento real do código, validou o número no portal e teve o download Android liberado. O registro do usuário e o cadastro ficaram com `whatsapp_verified=1`. A instalação e a ativação do aplicativo ainda precisam ser verificadas no aparelho.
 
 Consulte [a verificação de hoje](VERIFICACAO-2026-10-20.md). O [registro de 19/10/2026](VERIFICACAO-2026-10-19.md) permanece como histórico da versão anterior.
 
@@ -75,8 +75,8 @@ O diretório exige autenticação e pesquisa exata. Bloqueios impedem descoberta
 
 No Worker, uma consulta pendente pode levar até 25 segundos para devolver novidades. O cliente deve enviar receiptAfter e aplicar receipts para atualizar leituras sem recarregar o histórico; o módulo atual ainda usa o contrato básico de mensagens. Não há garantia de atualização instantânea.
 
-## Verificação pendente
+## Verificação realizada e limites
 
-O registro de hoje distingue revisão de código, migração e compilação de validação real. Depois do pareamento, ainda é necessário observar o recebimento de um OTP por um titular real, a validação que libera o download e uma conversa entre duas instalações. O pareamento e essas entregas não foram demonstrados nesta revisão.
+O cadastro real recebeu o OTP e foi confirmado pelo titular, criando uma sessão e liberando o download no portal. Permanecem sem comprovação a conclusão do arquivo, a instalação, a ativação do perfil no aplicativo e uma conversa entre duas instalações. Consulte o registro de 20/10/2026 para as evidências e a distinção entre recebimento humano e recibo automático.
 
 As cotas de Workers/D1 e as condições de uso do WhatsApp precisam ser acompanhadas; hospedagem gratuita e ponte local não garantem operação contínua ou escala ilimitada.
