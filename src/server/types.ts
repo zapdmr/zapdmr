@@ -49,7 +49,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   txFrequencyHz: DEFAULT_HOTSPOT_FREQUENCY_HZ, masterHost: '', masterPort: 62031,
   serverType: 'brandmeister', staticTalkgroups: '', locationName: '', latitude: '', longitude: '', defaultSlot: 1, theme: 'auto',
   autoConnectOnStartup: false, autoReconnect: false,
-  maxReconnectAttempts: 5, autoOpenTalkgroup: true, unlinkPreviousTalkgroup: true,
+  maxReconnectAttempts: 5, autoOpenTalkgroup: false, unlinkPreviousTalkgroup: false,
   sendLocationOnConnect: false, totEnabled: true,
   totLimitSeconds: 180, totWarningSeconds: 10, totVisualAlert: true, totSoundAlert: true,
   txGainPercent: 100, rxVolumePercent: 100,

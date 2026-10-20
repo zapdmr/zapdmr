@@ -13,7 +13,11 @@ CREATE TABLE IF NOT EXISTS registrations (
   created_at INTEGER NOT NULL,
   notice_version TEXT NOT NULL,
   whatsapp_verified INTEGER NOT NULL DEFAULT 0,
-  verified_at INTEGER
+  verified_at INTEGER,
+  update_notifications INTEGER CHECK(update_notifications IN(0,1)),
+  update_consent_at INTEGER,
+  downloaded_at INTEGER,
+  downloaded_version TEXT
 );
 CREATE INDEX IF NOT EXISTS registrations_retention ON registrations(created_at);
 CREATE INDEX IF NOT EXISTS registrations_identity ON registrations(callsign,phone_hash);
@@ -28,7 +32,12 @@ CREATE TABLE IF NOT EXISTS users (
   created_at INTEGER NOT NULL,
   verified_at INTEGER NOT NULL,
   whatsapp_verified INTEGER NOT NULL DEFAULT 1,
-  verification_method TEXT NOT NULL DEFAULT 'direct'
+  verification_method TEXT NOT NULL DEFAULT 'direct',
+  update_notifications INTEGER NOT NULL DEFAULT 0 CHECK(update_notifications IN(0,1)),
+  update_consent_at INTEGER,
+  update_consent_version TEXT,
+  downloaded_at INTEGER,
+  downloaded_version TEXT
 );
 CREATE TABLE IF NOT EXISTS sessions (
   hash TEXT PRIMARY KEY,
@@ -94,3 +103,71 @@ CREATE TABLE IF NOT EXISTS rate_limits (
   PRIMARY KEY(bucket,identity)
 );
 CREATE INDEX IF NOT EXISTS rate_limits_expiration ON rate_limits(expires_at);
+-- Additive: preserves existing users, sessions, OTPs and messages.
+PRAGMA foreign_keys = ON;
+CREATE TABLE IF NOT EXISTS attachments (
+ id TEXT PRIMARY KEY,
+ sender TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ recipient TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ name_cipher TEXT NOT NULL,
+ mime TEXT NOT NULL,
+ size INTEGER NOT NULL CHECK(size>0 AND size<=15728640),
+ created_at INTEGER NOT NULL,
+ ready INTEGER NOT NULL DEFAULT 0 CHECK(ready IN(0,1))
+);
+CREATE INDEX IF NOT EXISTS attachments_sender ON attachments(sender,created_at);
+CREATE TABLE IF NOT EXISTS attachment_chunks (
+ attachment_id TEXT NOT NULL REFERENCES attachments(id) ON DELETE CASCADE,
+ part INTEGER NOT NULL,
+ iv BLOB NOT NULL,
+ cipher BLOB NOT NULL,
+ PRIMARY KEY(attachment_id,part)
+);
+CREATE TABLE IF NOT EXISTS message_attachments (
+ message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+ attachment_id TEXT UNIQUE NOT NULL REFERENCES attachments(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS message_requests (
+ sender TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ client_id TEXT NOT NULL,
+ message_id TEXT UNIQUE NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+ PRIMARY KEY(sender,client_id)
+);
+CREATE TRIGGER IF NOT EXISTS delete_message_attachment BEFORE DELETE ON messages BEGIN
+ DELETE FROM attachments WHERE id IN (SELECT attachment_id FROM message_attachments WHERE message_id=OLD.id);
+END;
+
+CREATE INDEX IF NOT EXISTS users_release_audience ON users(update_notifications,update_consent_at,downloaded_at);
+CREATE TABLE IF NOT EXISTS release_announcements (
+ version TEXT PRIMARY KEY,
+ release_url TEXT NOT NULL,
+ published_at INTEGER NOT NULL,
+ created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS release_notification_outbox (
+ id TEXT PRIMARY KEY,
+ release_version TEXT NOT NULL REFERENCES release_announcements(version) ON DELETE CASCADE,
+ user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ payload_cipher TEXT NOT NULL,
+ status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN('queued','leased','sending','sent','delivered','failed','canceled','expired','unknown')),
+ created_at INTEGER NOT NULL,
+ expires_at INTEGER NOT NULL,
+ lease_id TEXT,
+ lease_until INTEGER NOT NULL DEFAULT 0,
+ started_at INTEGER,
+ submitted_at INTEGER,
+ delivered_at INTEGER,
+ UNIQUE(release_version,user_id)
+);
+CREATE INDEX IF NOT EXISTS release_notification_pending ON release_notification_outbox(status,expires_at,created_at);
+CREATE INDEX IF NOT EXISTS release_notification_user ON release_notification_outbox(user_id,status);
+CREATE TABLE IF NOT EXISTS release_notification_throttle (
+ id INTEGER PRIMARY KEY CHECK(id=1),
+ next_dispatch_at INTEGER NOT NULL DEFAULT 0
+);
+INSERT OR IGNORE INTO release_notification_throttle(id,next_dispatch_at) VALUES(1,0);
+-- A phone HMAC preserves an incoming PARAR across registrations. No raw number.
+CREATE TABLE IF NOT EXISTS release_notification_suppressions (
+ phone_hash TEXT PRIMARY KEY,
+ stopped_at INTEGER NOT NULL
+);

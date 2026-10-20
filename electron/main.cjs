@@ -1,6 +1,6 @@
 const path = require('node:path');
 const fs = require('node:fs');
-const { app, BrowserWindow, ipcMain, globalShortcut, powerSaveBlocker, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, globalShortcut, powerSaveBlocker, shell, dialog } = require('electron');
 if (require('electron-squirrel-startup')) app.quit();
 const { startServer } = require('../dist/server/index.js');
 
@@ -34,6 +34,16 @@ async function openWindow() {
   });
   ipcMain.removeHandler('zapdmr-operation');
   ipcMain.removeHandler('zapdmr-external');
+  ipcMain.removeHandler('zapdmr-save-attachment');
+  ipcMain.handle('zapdmr-save-attachment',async(event,value)=>{
+    if(event.sender!==window.webContents||new URL(event.senderFrame?.url||'about:blank').origin!==new URL(localServer.url).origin)throw new Error('Origem inválida.');
+    const name=String(value?.name||''),base64=String(value?.base64||'');
+    if(!name||name.length>140||/[\\/\x00-\x1f\x7f]/.test(name)||! /\.(jpg|jpeg|png|webp|pdf|txt|csv|zip|rar|dat|rdt|bin)$/i.test(name)||base64.length>20971520||! /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(base64))throw new Error('Arquivo inválido ou acima de 15 MB.');
+    const bytes=Buffer.from(base64,'base64');if(!bytes.length||bytes.length>15728640)throw new Error('O limite é de 15 MB.');
+    const result=await dialog.showSaveDialog(window,{title:'Salvar anexo do ZapChat',defaultPath:path.join(app.getPath('downloads'),name),buttonLabel:'Salvar arquivo'});
+    if(result.canceled||!result.filePath)return {canceled:true};
+    await fs.promises.writeFile(result.filePath,bytes);return {saved:true};
+  });
   ipcMain.handle('zapdmr-external',(event,value)=>{
     if(event.sender!==window.webContents||!event.senderFrame?.url.startsWith(localServer.url))throw new Error('Origem inválida.');
     if(!/^https:\/\/wa\.me\/[1-9]\d{7,14}$/.test(String(value)))throw new Error('Destino externo inválido.');
@@ -55,7 +65,7 @@ async function openWindow() {
     if(['F7','F8'].includes(scanKey)){scanShortcut=scanKey;globalShortcut.register(scanShortcut,()=>window.webContents.send('zapdmr-scan-key'));}
     return { shortcutRegistered };
   });
-  window.webContents.setUserAgent(window.webContents.getUserAgent()+' ZapDMR/1.3.1');
+  window.webContents.setUserAgent(window.webContents.getUserAgent()+' ZapDMR/1.4.0');
   await window.loadURL(localServer.url);
 }
 app.whenReady().then(openWindow);

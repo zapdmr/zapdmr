@@ -195,7 +195,7 @@
     const value=prefs();for(const id of optionKeys){const input=$('#'+id);if(!input)continue;if(input.type==='checkbox')input.checked=Boolean(value[id]);else input.value=String(value[id]);}
     for(const [key,on]of Object.entries(value.columns)){const input=$('#column-'+key);if(input)input.checked=Boolean(on);}
     $('#voxState').textContent=value.voxEnabled?(native()?(gatewayStatus.connected?'VOX configurado no serviço Android.':'VOX configurado · aguarda ligação ao master.'):'VOX configurado · requer janela ativa.'):'VOX desligado.';
-    const hint=document.querySelector('.operation-hint');if(hint)hint.textContent=value.pttMode==='toggle'?'Toque para iniciar e toque novamente para parar. Trocar de TG envia sinalização silenciosa ao master.':'Mantenha premido para transmitir. Soltar libera o PTT.';
+    const hint=document.querySelector('.operation-hint');if(hint)hint.textContent=value.pttMode==='toggle'?'Toque para iniciar e toque novamente para parar. Trocar de TG não transmite; a escuta depende do master.':'Mantenha premido para transmitir. Soltar libera o PTT.';
     $('#operationTheme').value=settings.theme;$('#audioMeters').hidden=!value.showMeters;
     $('#batterySettings').disabled=!native();$('#allowLocked').disabled=!native();
     document.body.classList.toggle('hide-window-title',value.hideStatusBar&&!native());reflectTx();renderPreview();renderParticipantsView();

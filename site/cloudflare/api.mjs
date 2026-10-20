@@ -1,9 +1,12 @@
 // GPL-3.0-only. Cloudflare Workers + D1 API; no Node compatibility flag required.
 // Route handling, CORS, security headers, static assets and scheduled cleanup
 // are composed by the Worker entry point. No credentials are generated here.
+import {attachments} from './attachments.mjs';
+import {createReleaseNotifications} from './release-notifications.mjs';
 const encoder=new TextEncoder(),decoder=new TextDecoder('utf-8',{fatal:true});
 const configs=new WeakMap();
-const NOTICE_VERSION='2026-10-19',DAY=86400000;
+const NOTICE_VERSION='2026-10-20',DAY=86400000;
+const releaseNotices=createReleaseNotifications({failure,json,body,rate,hash,sameHash,seal,unseal,normalizePhone,phoneVariants,randomToken,bridgeAuth});
 
 function failure(status,message,details={}){return Object.assign(new Error(message),{status,...details});}
 function json(status,value,headers={}){return new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...headers}});}
@@ -80,8 +83,8 @@ async function currentUser(config,request){
   const row=await config.db.prepare('SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.hash=? AND s.expires_at>?').bind(await hash(config,token),Date.now()).first();
   if(!row)throw failure(401,'Sessão expirada. Confirme novamente o número.');return row;
 }
-async function publicUser(config,row,own=false){return {id:row.id,callsign:row.callsign,dmrId:row.dmr_id,verified:Boolean(row.whatsapp_verified),whatsapp_verified:Boolean(row.whatsapp_verified),verificationMethod:row.verification_method,sharePhone:Boolean(row.share_phone),...(own||row.share_phone?{whatsapp:await unseal(config,row.phone_cipher)}:{})};}
-async function publicMessage(config,row,own){return {id:row.id,from:row.sender,to:row.recipient,text:await unseal(config,row.body_cipher),at:row.at,readAt:row.read_at,direction:row.sender===own?'out':'in',state:row.read_at?'read':'sent'};}
+async function publicUser(config,row,own=false){return {id:row.id,callsign:row.callsign,dmrId:row.dmr_id,verified:Boolean(row.whatsapp_verified),whatsapp_verified:Boolean(row.whatsapp_verified),verificationMethod:row.verification_method,sharePhone:Boolean(row.share_phone),...(own?await releaseNotices.preference(config,row.id):{}),...(own||row.share_phone?{whatsapp:await unseal(config,row.phone_cipher)}:{})};}
+async function publicMessage(config,row,own){return {id:row.id,from:row.sender,to:row.recipient,text:await unseal(config,row.body_cipher),at:row.at,readAt:row.read_at,direction:row.sender===own?'out':'in',state:row.read_at?'read':'sent',...(row.attachment_id?{attachment:{id:row.attachment_id,name:await unseal(config,row.attachment_name),size:row.attachment_size,mime:row.attachment_mime,kind:row.attachment_mime.startsWith('image/')?'image':'document'}}:{})};}
 function downloadMetadata(env,config,platform){
   if(!config.downloads[platform])return {available:false};
   const prefix=platform==='android'?'DOWNLOAD_ANDROID':'DOWNLOAD_WINDOWS',bytes=Number(env[prefix+'_BYTES']),sha256=env[prefix+'_SHA256'];
@@ -89,13 +92,16 @@ function downloadMetadata(env,config,platform){
 }
 async function downloadToken(config,id,platform){const value=base64url(encoder.encode(JSON.stringify({id,platform,expires:Date.now()+900000}))),signature=base64url(await crypto.subtle.sign('HMAC',config.downloadHmac,encoder.encode(value)));return value+'.'+signature;}
 async function pairAvailable(config,own,peer){return config.db.prepare('SELECT u.id FROM users u WHERE u.id=? AND NOT EXISTS(SELECT 1 FROM blocks b WHERE (b.owner=? AND b.peer=u.id) OR (b.owner=u.id AND b.peer=?))').bind(peer,own,own).first();}
-async function messageBatch(config,own,peer,after,receiptAfter,includeReceipts){
-  const statements=[config.db.prepare('SELECT * FROM messages WHERE ((sender=? AND recipient=?) OR (sender=? AND recipient=?)) AND at>=? ORDER BY at,id LIMIT 100').bind(own,peer,peer,own,after)];
+const messageSelect=`SELECT m.*,a.id AS attachment_id,a.name_cipher AS attachment_name,a.size AS attachment_size,a.mime AS attachment_mime FROM messages m LEFT JOIN message_attachments ma ON ma.message_id=m.id LEFT JOIN attachments a ON a.id=ma.attachment_id`;
+async function messageBatch(config,own,peer,after,receiptAfter,includeReceipts,before=0){
+  const initial=!after||before>0;
+  const statements=[config.db.prepare(messageSelect+' WHERE ((m.sender=? AND m.recipient=?) OR (m.sender=? AND m.recipient=?)) AND m.at>=?'+(before?' AND m.at<?':'')+' ORDER BY m.at '+(initial?'DESC':'ASC')+',m.id '+(initial?'DESC':'ASC')+' LIMIT 100').bind(own,peer,peer,own,after,...(before?[before]:[]))];
   if(includeReceipts)statements.push(config.db.prepare('SELECT id,read_at AS readAt FROM messages WHERE sender=? AND recipient=? AND read_at>=? ORDER BY read_at,id LIMIT 100').bind(own,peer,receiptAfter));
   const results=await config.db.batch(statements),receipts=includeReceipts?results[1].results:[];
-  return {messages:await Promise.all(results[0].results.map(row=>publicMessage(config,row,own))),receipts,nextReceiptCursor:receipts.length?receipts[receipts.length-1].readAt+1:receiptAfter};
+  const rows=initial?results[0].results.reverse():results[0].results;
+  return {messages:await Promise.all(rows.map(row=>publicMessage(config,row,own))),receipts,nextCursor:rows.length?rows[rows.length-1].at+1:after,nextReceiptCursor:receipts.length?receipts[receipts.length-1].readAt+1:receiptAfter,hasMore:initial&&rows.length===100,beforeCursor:rows.length?rows[0].at:0};
 }
-function waitForMessages(signal){return new Promise((resolve,reject)=>{if(signal.aborted)return reject(failure(499,'Pedido cancelado.'));const finish=()=>{signal.removeEventListener('abort',abort);resolve();},timer=setTimeout(finish,25000),abort=()=>{clearTimeout(timer);signal.removeEventListener('abort',abort);reject(failure(499,'Pedido cancelado.'));};signal.addEventListener('abort',abort,{once:true});});}
+function waitForMessages(signal){return new Promise((resolve,reject)=>{if(signal.aborted)return reject(failure(499,'Pedido cancelado.'));const finish=()=>{signal.removeEventListener('abort',abort);resolve();},timer=setTimeout(finish,3000),abort=()=>{clearTimeout(timer);signal.removeEventListener('abort',abort);reject(failure(499,'Pedido cancelado.'));};signal.addEventListener('abort',abort,{once:true});});}
 async function deliverCode(config,env,request,row,code){
   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),12000),abort=()=>controller.abort();request.signal.addEventListener('abort',abort,{once:true});
   try{const number=await unseal(config,row.phone_cipher),modern=Boolean(config.whatsappUrl&&env.WHATSAPP_API_TOKEN);const response=await fetch(modern?config.whatsappUrl:config.otpUrl,{method:'POST',redirect:'error',headers:{'Content-Type':'application/json',Authorization:'Bearer '+(modern?env.WHATSAPP_API_TOKEN:env.OTP_DELIVERY_TOKEN)},body:JSON.stringify(modern?{number,text:otpMessage(row.callsign,code)}:{phone:number,code,expiresInSeconds:600}),signal:controller.signal});const accepted=response.ok;await response.body?.cancel();if(!accepted)throw new Error('Delivery rejected');}
@@ -167,7 +173,8 @@ export async function handleApi(request,env,url=new URL(request.url)){
 }
 async function api(request,env,url,config){
   const route=url.pathname,method=request.method,db=config.db;
-  if(route==='/v1/status'&&method==='GET'){const mode=await verificationMode(config,env);return json(200,{version:'1.3.1',registration:true,verificationConfigured:mode!=='unavailable',verificationMode:mode,developmentMode:false,bridgeConnected:await bridgeConnected(config,env),downloadRequiresVerification:true,owner:env.OWNER_NAME,privacyEmail:env.PRIVACY_EMAIL,downloads:{android:downloadMetadata(env,config,'android'),windows:downloadMetadata(env,config,'windows')}});}
+  const noticeResponse=await releaseNotices.handleApi(request,env,url,config);if(noticeResponse)return noticeResponse;
+  if(route==='/v1/status'&&method==='GET'){const mode=await verificationMode(config,env);return json(200,{version:'1.4.0',chatAttachments:true,maxAttachmentBytes:15728640,registration:true,verificationConfigured:mode!=='unavailable',verificationMode:mode,developmentMode:false,bridgeConnected:await bridgeConnected(config,env),downloadRequiresVerification:true,owner:env.OWNER_NAME,privacyEmail:env.PRIVACY_EMAIL,downloads:{android:downloadMetadata(env,config,'android'),windows:downloadMetadata(env,config,'windows')}});}
   if(route.startsWith('/v1/whatsapp/')&&method==='POST'){
     await bridgeAuth(config,env,request);await rate(config,request,'whatsapp-bridge',120);const raw=await body(request),now=Date.now();
     if(route==='/v1/whatsapp/webhook'){
@@ -216,6 +223,7 @@ async function api(request,env,url,config){
     if(raw.noticeAccepted!==true)throw failure(400,'Leia e aceite a utilização dos dados para o cadastro.');
     const call=normalizeCallsign(raw.callsign),id=normalizeRadioId(raw.dmrId),number=normalizePhone(raw.whatsapp),platform=raw.platform==='windows'?'windows':'android',registrationId=crypto.randomUUID();
     await db.prepare('INSERT INTO registrations(id,callsign,dmr_id,phone_cipher,phone_hash,share_phone,platform,created_at,notice_version) VALUES(?,?,?,?,?,?,?,?,?)').bind(registrationId,call,id,await seal(config,number),await hash(config,number),raw.sharePhone===true?1:0,platform,Date.now(),NOTICE_VERSION).run();
+    await releaseNotices.registrationConsent(config,registrationId,raw.updateNotifications);
     const available=Boolean(config.downloads[platform]),row=await db.prepare('SELECT * FROM registrations WHERE id=?').bind(registrationId).first();
     let challenge;
     if(raw.requestVerification===true)try{challenge=await issueChallenge(config,env,request,row);}catch(error){if(error.status!==429)throw error;challenge={mode:'unavailable',sent:false,expiresInSeconds:600,retryAfterSeconds:error.retryAfterSeconds||60,message:error.message};}
@@ -262,11 +270,12 @@ async function api(request,env,url,config){
       db.prepare('DELETE FROM whatsapp_outbox WHERE registration_id=? AND code_hash=?').bind(row.id,codeRow.hash)
     ]);}catch(error){if(String(error.message).includes('UNIQUE constraint'))throw failure(409,'O perfil já está vinculado a outra conta.');throw error;}
     if(!result[0].results.length||!result[1].meta.changes)throw failure(401,'O código já foi utilizado. Solicite outro.');
+    await releaseNotices.activateConsent(config,row.id,result[0].results[0].id);
     const available=Boolean(config.downloads[row.platform]);return json(200,{token,user:await publicUser(config,result[0].results[0],true),expiresInDays:30,downloadAvailable:available,downloadUrl:available?'/download/'+await downloadToken(config,row.id,row.platform):null});
   }
   const me=await currentUser(config,request);await rate(config,request,'authenticated',240);
   if(route==='/v1/me'&&method==='GET')return json(200,{user:await publicUser(config,me,true)});
-  if(route==='/v1/me'&&method==='PATCH'){const raw=await body(request),updated=await db.prepare('UPDATE users SET share_phone=? WHERE id=? RETURNING *').bind(raw.sharePhone===true?1:0,me.id).first();return json(200,{user:await publicUser(config,updated,true)});}
+  if(route==='/v1/me'&&method==='PATCH'){const raw=await body(request),updated=await db.prepare('UPDATE users SET share_phone=? WHERE id=? RETURNING *').bind(typeof raw.sharePhone==='boolean'?(raw.sharePhone?1:0):me.share_phone,me.id).first();await releaseNotices.setPreference(config,me.id,raw.updateNotifications);return json(200,{user:await publicUser(config,updated,true)});}
   if(route==='/v1/me'&&method==='DELETE'){await db.batch([db.prepare('DELETE FROM registrations WHERE phone_hash=? AND callsign=?').bind(me.phone_hash,me.callsign),db.prepare('DELETE FROM users WHERE id=?').bind(me.id)]);return json(200,{deleted:true});}
   if(route==='/v1/directory'&&method==='GET'){
     const query=String(url.searchParams.get('query')||'').trim().toUpperCase();if(!/^[A-Z0-9]{3,8}$/.test(query))throw failure(400,'Pesquise um indicativo ou Radio ID exato.');
@@ -277,14 +286,20 @@ async function api(request,env,url,config){
     if(raw.blocked===false)await db.prepare('DELETE FROM blocks WHERE owner=? AND peer=?').bind(me.id,peer).run();else await db.prepare('INSERT OR IGNORE INTO blocks(owner,peer) VALUES(?,?)').bind(me.id,peer).run();return json(200,{ok:true});
   }
   if(route==='/v1/messages'&&method==='POST'){
-    await rate(config,request,'messages',30);const raw=await body(request),to=String(raw.to||''),text=String(raw.text||'').trim();
-    if(!to||to===me.id||!text||text.length>2000)throw failure(400,'Destino inválido ou mensagem fora do limite de 2.000 caracteres.');if(!await pairAvailable(config,me.id,to))throw failure(404,'Este contacto não está disponível.');
-    const id=crypto.randomUUID(),row=await db.prepare('INSERT INTO messages(id,sender,recipient,body_cipher,at,read_at) VALUES(?,?,?,?,(SELECT MAX(?,COALESCE(MAX(at),0)+1) FROM messages),NULL) RETURNING *').bind(id,me.id,to,await seal(config,text),Date.now()).first();return json(201,await publicMessage(config,row,me.id));
+    await rate(config,request,'messages',30,60000,me.id);const raw=await body(request),to=String(raw.to||''),text=String(raw.text||'').trim(),attachmentId=String(raw.attachmentId||''),clientId=String(raw.clientId||'');
+    if(!to||to===me.id||(!text&&!attachmentId)||text.length>2000||clientId&&!/^[a-zA-Z0-9_-]{16,80}$/.test(clientId))throw failure(400,'Destino inválido ou mensagem fora do limite de 2.000 caracteres.');if(!await pairAvailable(config,me.id,to))throw failure(404,'Este contacto não está disponível.');
+    const id=clientId?await hash(config,'message:'+me.id+':'+clientId):crypto.randomUUID();
+    const prior=await db.prepare(messageSelect+' WHERE m.id=? AND m.sender=?').bind(id,me.id).first();
+    if(prior){if(prior.recipient!==to||await unseal(config,prior.body_cipher)!==text||(prior.attachment_id||'')!==attachmentId)throw failure(409,'Este envio já foi usado para outra mensagem.');return json(200,await publicMessage(config,prior,me.id));}
+    if(attachmentId&&!await db.prepare('SELECT id FROM attachments a WHERE id=? AND sender=? AND recipient=? AND ready=1 AND NOT EXISTS(SELECT 1 FROM message_attachments ma WHERE ma.attachment_id=a.id)').bind(attachmentId,me.id,to).first())throw failure(400,'O anexo não está disponível para esta conversa.');
+    const statements=[db.prepare('INSERT INTO messages(id,sender,recipient,body_cipher,at,read_at) VALUES(?,?,?,?,(SELECT MAX(?,COALESCE(MAX(at),0)+1) FROM messages),NULL) ON CONFLICT(id) DO NOTHING').bind(id,me.id,to,await seal(config,text),Date.now())];
+    if(attachmentId)statements.push(db.prepare('INSERT INTO message_attachments(message_id,attachment_id) VALUES(?,?) ON CONFLICT(message_id) DO NOTHING').bind(id,attachmentId));
+    await db.batch(statements);const row=await db.prepare(messageSelect+' WHERE m.id=?').bind(id).first();return json(201,await publicMessage(config,row,me.id));
   }
   if(route==='/v1/messages'&&method==='GET'){
-    const peer=String(url.searchParams.get('peer')||''),after=cursor(url.searchParams.get('after')),receiptAfter=cursor(url.searchParams.get('receiptAfter')),includeReceipts=url.searchParams.has('receiptAfter');
+    const peer=String(url.searchParams.get('peer')||''),after=cursor(url.searchParams.get('after')),before=cursor(url.searchParams.get('before')),receiptAfter=cursor(url.searchParams.get('receiptAfter')),includeReceipts=url.searchParams.has('receiptAfter');
     if(!await pairAvailable(config,me.id,peer))throw failure(404,'Este contacto não está disponível.');
-    let batch=await messageBatch(config,me.id,peer,after,receiptAfter,includeReceipts);
+    let batch=await messageBatch(config,me.id,peer,after,receiptAfter,includeReceipts,before);
     if(!batch.messages.length&&!batch.receipts.length&&url.searchParams.get('wait')==='1'){
       // Workers on different isolates cannot notify each other through a Map.
       // One final query after sleeping bounds D1 requests per long poll.
@@ -299,10 +314,14 @@ async function api(request,env,url,config){
     // Materialized CTEs freeze the old maximum and pending rows for this atomic
     // update, assigning a distinct increasing read_at to every receipt.
     const changed=await db.prepare(`WITH base AS MATERIALIZED (SELECT MAX(?,COALESCE(MAX(read_at),0)+1) AS first_at FROM messages),
-      pending AS MATERIALIZED (SELECT id,ROW_NUMBER() OVER(ORDER BY at,id)-1 AS ordinal FROM messages WHERE recipient=? AND sender=? AND read_at IS NULL)
-      UPDATE messages SET read_at=(SELECT first_at FROM base)+(SELECT ordinal FROM pending WHERE pending.id=messages.id) WHERE id IN(SELECT id FROM pending)`).bind(Date.now(),me.id,peer).run();
+      pending AS MATERIALIZED (SELECT id,ROW_NUMBER() OVER(ORDER BY at,id)-1 AS ordinal FROM messages WHERE recipient=? AND sender=? AND read_at IS NULL AND at<=?)
+      UPDATE messages SET read_at=(SELECT first_at FROM base)+(SELECT ordinal FROM pending WHERE pending.id=messages.id) WHERE id IN(SELECT id FROM pending)`).bind(Date.now(),me.id,peer,raw.through==null?Number.MAX_SAFE_INTEGER:cursor(raw.through)).run();
     return json(200,{ok:true,changed:Number(changed.meta.changes||0)});
   }
+  if(route==='/v1/attachments'&&method==='POST')return attachments(config,{seal,unseal,pairAvailable,rate,json}).upload(request,url,me);
+  const attachmentRoute=route.match(/^\/v1\/attachments\/([a-f0-9-]{36})$/i);
+  if(attachmentRoute&&method==='GET')return attachments(config,{seal,unseal,pairAvailable,rate,json}).download(attachmentRoute[1],request,url,me);
+  if(attachmentRoute&&method==='DELETE')return attachments(config,{seal,unseal,pairAvailable,rate,json}).remove(attachmentRoute[1],me);
   return json(404,{message:'Recurso não encontrado.'});
 }
 
@@ -318,6 +337,7 @@ export async function handleDownload(request,env,url=new URL(request.url)){
     let data;try{data=JSON.parse(decoder.decode(unbase64url(parts[0])));}catch{throw failure(403,'Link de download inválido.');}
     if(!data||!Number.isSafeInteger(data.expires)||data.expires<Date.now()||!['android','windows'].includes(data.platform)||!await config.db.prepare('SELECT id FROM registrations WHERE id=? AND whatsapp_verified=1 AND verified_at IS NOT NULL').bind(String(data.id||'')).first())throw failure(403,'Confirme o WhatsApp para liberar o download ou solicite um novo link.');
     const target=config.downloads[data.platform];if(!target)throw failure(404,'Instalador ainda não publicado.');
+    if(request.method==='GET')await releaseNotices.markDownload(config,String(data.id),data.platform);
     return new Response(null,{status:302,headers:{Location:target,'Cache-Control':'private, no-store','Referrer-Policy':'no-referrer'}});
   }catch(error){return errorResponse(error);}
 }
@@ -327,10 +347,14 @@ export async function handleDownload(request,env,url=new URL(request.url)){
 export async function cleanup(env){
   const config=await configuration(env),now=Date.now();
   return config.db.batch([
+    ...releaseNotices.cleanupStatements(config,now),
     config.db.prepare('DELETE FROM rate_limits WHERE expires_at<?').bind(now),
     config.db.prepare('DELETE FROM sessions WHERE expires_at<?').bind(now),
     config.db.prepare('DELETE FROM codes WHERE expires_at<?').bind(now),
     config.db.prepare('DELETE FROM whatsapp_outbox WHERE expires_at<?').bind(now),
+    config.db.prepare('DELETE FROM attachments WHERE created_at<? AND NOT EXISTS(SELECT 1 FROM message_attachments ma WHERE ma.attachment_id=attachments.id)').bind(now-3600000),
     config.db.prepare('DELETE FROM registrations WHERE created_at<? AND NOT EXISTS(SELECT 1 FROM users WHERE users.callsign=registrations.callsign AND users.phone_hash=registrations.phone_hash)').bind(now-30*DAY)
   ]);
 }
+
+export async function discoverReleaseNotifications(env){return releaseNotices.discoverLatestRelease(await configuration(env));}

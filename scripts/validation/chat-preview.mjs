@@ -1,0 +1,17 @@
+import http from 'node:http';
+import {readFile} from 'node:fs/promises';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {fixture} from './chat-fixture.mjs';
+import {handleApi} from '../../site/cloudflare/api.mjs';
+const f=await fixture(),root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../web'),port=4194;
+const initial=await f.request('TEST1B','/v1/messages',{to:f.users.TEST1A,text:'Olá! Conversa de verificação local, sem usuários reais.',clientId:'local_preview_message_0001'});await initial.response.text();
+http.createServer(async(req,res)=>{try{
+ const url=new URL(req.url,'http://127.0.0.1:'+port),who=url.searchParams.get('as')==='b'?'TEST1B':'TEST1A';
+ if(url.pathname==='/qa-profile'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({ok:true,data:{endpoint:'http://127.0.0.1:'+port,token:f.tokens[who],account:{id:f.users[who],callsign:who,dmrId:who==='TEST1A'?'1000000':'1000001',whatsapp_verified:true},phone:'+15555550101',noticeAccepted:false,sharePhone:false}}));return;}
+ if(url.pathname.startsWith('/v1/')){const request=new Request(url,{method:req.method,headers:req.headers,...(!['GET','HEAD'].includes(req.method)?{body:req,duplex:'half'}:{})});const response=await handleApi(request,f.env);res.writeHead(response.status,Object.fromEntries(response.headers));if(response.body){for await(const part of response.body)res.write(part);}res.end();return;}
+ if(url.pathname==='/bootstrap.js'){res.setHeader('Content-Type','application/javascript');res.end(`window.mobileAudio={isAndroid:()=>false};window.mobileSecureConfig={};window.settings={callsign:${JSON.stringify(who)},dmrId:'1000000'};window.apiAvailable=true;window.callApi=async()=>fetch('/qa-profile?as=${who==='TEST1B'?'b':'a'}').then(r=>r.json());window.$=s=>document.querySelector(s);window.setActiveScreen=()=>{};window.setActiveSettingsPane=()=>{};window.toast=console.log;window.ZapDMRReady=true;document.getElementById('qa-open').onclick=()=>window.ZapDMRCommunity.open();`);return;}
+ let file=path.basename(url.pathname);if(url.pathname==='/'){let html=await readFile(path.join(root,'index.html'),'utf8');html=html.replace(/<script[^>]+src="[^\"]+"[^>]*><\/script>/g,'');html=html.replace('</body>',`<script src="/bootstrap.js?as=${who==='TEST1B'?'b':'a'}"></script><script src="/attachments-native.js"></script><script src="/community-chat.js"></script><script src="/community.js"></script></body>`);html=html.replace('<body>','<body><div style="background:#dcf5e5;padding:12px;text-align:center;font:14px sans-serif">VERIFICAÇÃO LOCAL · contas fictícias TEST1A/TEST1B/TEST1C · sem produção <button id="qa-open">Abrir ZapChat</button></div>');res.setHeader('Content-Type','text/html; charset=utf-8');res.end(html);return;}
+ if(!['community.js','community-chat.js','attachments-native.js','community.css','styles.css','radio-console.css','ZapDMR.png'].includes(file)){res.writeHead(404);res.end();return;}
+ res.setHeader('Content-Type',file.endsWith('.js')?'application/javascript':file.endsWith('.css')?'text/css':'image/png');res.end(await readFile(path.join(root,file)));
+ }catch(error){res.writeHead(500);res.end('Local preview error: '+error.message);}}).listen(port,'127.0.0.1',()=>console.log('ZapChat isolated preview http://127.0.0.1:'+port));

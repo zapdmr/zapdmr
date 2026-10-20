@@ -18,7 +18,7 @@
         <section class="card operation-card">
           <div class="heading"><div><p class="kicker">OPERAÇÃO DE VOZ</p><h2 id="pttScreenTitle">TalkGroup ativa</h2></div><button id="favoriteSelected" class="star" type="button" title="Favoritar">☆</button></div>
           <div class="selected"><i id="selectedActivityLed" class="activity-led" aria-label="Sem tráfego recente"></i><strong id="selectedId">TG 724</strong><div><b id="selectedName">Brasil Nacional</b><small id="selectedMeta">TS 1</small><small id="selectedCaller" class="activity-caller"></small></div><span id="selectedCategory" class="pill">Nacional</span></div>
-          <button id="pttScan" class="passive-scan-card" type="button" aria-pressed="false"><span>◉ Escuta passiva</span><b id="pttScanLabel">A procurar… · iniciar Scan</b><small>Troca automática: TG 4000 e ativação silenciosa da nova TG, sem microfone.</small></button><label class="quick-talkgroup">Sintonizar TalkGroup<select id="quickTalkgroupSelect" aria-label="Selecionar TalkGroup ativa"></select></label>
+          <button id="pttScan" class="passive-scan-card" type="button" aria-pressed="false"><span>◉ Escuta passiva</span><b id="pttScanLabel">A procurar… · iniciar Scan</b><small>Seleção passiva: não transmite. A escuta depende do encaminhamento do master.</small></button><label class="quick-talkgroup">Sintonizar TalkGroup<select id="quickTalkgroupSelect" aria-label="Selecionar TalkGroup ativa"></select></label>
           <button id="ptt" class="button ptt ptt-large" type="button" disabled>🎙 Preparar PTT</button>
           <div id="audioMeters" class="audio-meter" aria-label="Medidores de modulação">
             <div class="audio-meter-row" role="meter" aria-label="Modulação TX" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><b>TX</b><div id="txAudioMeterSegments" class="audio-meter-segments" aria-hidden="true"></div><span id="txAudioMeterValue" class="audio-meter-value">— dBFS</span></div>
@@ -26,7 +26,7 @@
             <small id="audioMeterCaller" class="audio-meter-caller"></small>
           </div>
           <p id="totState" class="tot-state hint tiny" hidden></p>
-          <p class="operation-hint">Toque e segure o PTT para transmitir na TG selecionada. Trocar de TG envia apenas sinalização silenciosa.</p>
+          <p class="operation-hint">Toque e segure o PTT para transmitir na TG selecionada. Trocar de TG não transmite. O primeiro PTT pode ativar a TG no master.</p>
         </section>
         <section class="card participants-card"><div class="heading"><div><p class="kicker">LAST HEARD · RODADA ATUAL</p><h2>Participantes da Rodada</h2></div><span id="participantCount" class="pill">0</span></div>
           <div class="participant-table-wrap"><table class="participant-table"><thead><tr><th>Hora</th><th>Indic.</th><th>Nome</th><th>Localização</th></tr></thead><tbody id="participantsRows"></tbody></table></div>
@@ -60,7 +60,7 @@
           <button id="toggleConnectionDetails" class="connection-details-toggle" type="button" aria-expanded="false">Ligação e favoritos ▾</button><nav id="chips" class="chips" aria-label="Categorias"></nav>
           <div class="activity-toolbar"><nav class="activity-filters" aria-label="Estado das TalkGroups"><button type="button" data-activity-filter="all" class="active" aria-pressed="true">Todas</button><button type="button" data-activity-filter="favorites" aria-pressed="false" title="TalkGroups favoritas">★</button><button type="button" data-activity-filter="active" aria-pressed="false" title="Em comunicação ou com atividade recente"><i class="filter-led online"></i>Ativas <span id="activeTgCount">0</span></button><button type="button" data-activity-filter="offline" aria-pressed="false" title="Sem atividade observada nos últimos 60 segundos"><i class="filter-led offline"></i>Offline <span id="offlineTgCount">0</span></button></nav><button id="scanTalkgroups" class="scan-button" type="button" aria-pressed="false">▶ Scan</button></div>
           <p id="scanStatus" class="scan-status" role="status">Verde: atividade recente · vermelho: sem tráfego observado.</p><p id="catalogActivitySource" class="catalog-source">Monitor de atividade a iniciar…</p>
-          <p class="monitor-hint">Escuta automática após vinculação da TG ao master. Selecionar e Scan sincronizam a TG com o master.</p><div id="groups" class="groups" role="list" aria-label="TalkGroups disponíveis"></div><p id="empty" class="hint" hidden>Nenhuma TG neste filtro. O estado depende da atividade recebida pelo monitor.</p>
+          <p class="monitor-hint">Selecionar e Scan alteram apenas o filtro RX. A TG precisa ser encaminhada pelo master.</p><div id="groups" class="groups" role="list" aria-label="TalkGroups disponíveis"></div><p id="empty" class="hint" hidden>Nenhuma TG neste filtro. O estado depende da atividade recebida pelo monitor.</p>
         </section>
       </div>
     </section>
@@ -164,6 +164,6 @@
     </form>
   </dialog>
   <dialog id="profileDialog" class="talkgroup-dialog profile-dialog"><form id="profileForm"><div><p class="kicker">PERFIS DO ZAPDMR</p><h2>Adicionar perfil</h2></div><label>Nome do perfil<input id="newProfileName" maxlength="40" required placeholder="Ex.: XLX026"></label><p class="hint tiny">O novo perfil começa com os dados atuais; depois pode editar ID, servidor e restantes campos sem alterar os outros perfis.</p><div class="dialog-actions"><button id="cancelProfile" class="button secondary" type="button">Cancelar</button><button id="saveProfile" class="button primary" type="submit">Criar perfil</button></div></form></dialog>
-  <div id="toast" role="status" class="toast"></div><script src="/mobile-audio.js" defer></script><script src="/catalog-store.js" defer></script><script src="/talkgroup-activity.js" defer></script><script src="/app.js" defer></script><script src="/operation-controls.js" defer></script><script src="/radio-console.js" defer></script><script src="/radio-bridge.js" defer></script><script src="/community.js" defer></script>
+  <div id="toast" role="status" class="toast"></div><script src="/mobile-audio.js" defer></script><script src="/catalog-store.js" defer></script><script src="/talkgroup-activity.js" defer></script><script src="/app.js" defer></script><script src="/operation-controls.js" defer></script><script src="/radio-console.js" defer></script><script src="/radio-bridge.js" defer></script><script src="/attachments-native.js" defer></script><script src="/community-chat.js" defer></script><script src="/community.js" defer></script>
 </body>
 </html>

@@ -2,11 +2,13 @@
 
 O portal e a API da comunidade usam Workers + D1. Instaladores e fontes ficam em Releases do [repositório zapdmr/zapdmr](https://github.com/zapdmr/zapdmr). O servidor Node de ../server.mjs é uma alternativa; não é executado no Worker.
 
-## Estado em 20/10/2026
+## Atualização 1.4.0 em 20/10/2026
 
-O frontend e a API 1.3.1 com OTP foram publicados. A migração remota de confirmação e fila concluiu 14 comandos, além da inicialização histórica do banco. A ponte Windows Baileys está aberta em http://127.0.0.1:4193, com QR aguardando o responsável vincular **+5543996741200**. O recebimento real de um código e uma validação positiva em produção ainda não foram demonstrados.
+Anexos privados do ZapChat com até 15 MiB, prévia e download foram implementados e verificados com duas contas locais isoladas. Migração 0002 dos anexos aplicada ao D1 existente; migração 0003 adiciona consentimento opcional de avisos de versões. Consulte [anexos e limites](../ZAPCHAT-ANEXOS.md) e [avisos opcionais](../AVISOS-VERSOES.md).
 
-O portal exige confirmação antes de gerar o link de instalador. Os builds Android e Windows 1.3.1 existem localmente. Atualize as URLs de download apenas depois de publicar e conferir os respectivos assets. A configuração ainda pode apontar à Release v1.3.0 durante a preparação da atualização; a versão do backend não determina qual APK/EXE está em uma URL.
+O responsável já recebeu e validou um OTP real na versão 1.3.1. A ponte local Windows continua necessária e o computador deve permanecer ligado; a tentativa de hospedagem na Oracle foi abandonada a pedido do responsável. Nenhum aviso de versão foi enviado durante os testes. A validação de anexos e de foco de áudio nos aparelhos reais permanece uma etapa do operador.
+
+Publique e confira os assets 1.4.0 antes de trocar as URLs do portal. Um APK/EXE antigo não recebe a nova interface apenas pela atualização do backend.
 
 Responsável: **Rizandro Cesar da Silva**. Contato/privacidade: **rizandro@gmail.com**. Consulte [o registro de 20/10/2026](../VERIFICACAO-2026-10-20.md), [autenticação](../AUTENTICACAO.md) e [OTP](../WHATSAPP-OTP.md). O [registro anterior](../VERIFICACAO-2026-10-19.md) preserva as verificações HTTPS e da Release realizadas em 19/10.
 

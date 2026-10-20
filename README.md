@@ -65,3 +65,15 @@ Consulte [a implantação Cloudflare](site/cloudflare/README.md), [a documentaç
 ## Licença
 
 O código do ZapDMR é distribuído sob [GPL-3.0-only](LICENSE). Preserve os [avisos de componentes de terceiros](THIRD_PARTY_NOTICES.md) e as licenças incluídas. Recursos de firmware e dependências têm os próprios avisos e condições descritos no pacote completo e na documentação; não presuma que a GPL do aplicativo altera as licenças desses recursos.
+
+
+## ZapChat 1.4.0
+
+- Anexos privados: fotos, documentos e codeplugs até 15 MiB, prévia, legenda e download; cache e miniaturas com limites de memória.
+- Reabertura, troca de contactos, cursores do servidor e recibos de leitura corrigidos.
+- Rádio: seleção de TG passiva, sem burst automático; encaminhamento depende do master ou do primeiro PTT. Android com espera e retomada de foco RX.
+- Avisos de novas versões por WhatsApp: consentimento separado, opcional e cancelável com PARAR; contas antigas não são inscritas automaticamente.
+
+[Implementação e limites](site/ZAPCHAT-ANEXOS.md) · [Avisos de versões](site/AVISOS-VERSOES.md).
+
+Verificação local com dois clientes e banco isolado concluída. Os novos builds ainda precisam de validação de áudio e troca de anexos nos aparelhos reais. O PC da ponte WhatsApp deve permanecer ligado e online.

@@ -521,22 +521,11 @@ async function tuneSelectedTalkgroup(id){
   if(!apiAvailable)return;
   desktopTunePending++;
   try{
-    if(!gatewayStatus.connected&&!['resolving','waiting-login','waiting-auth','waiting-config','reconnecting'].includes(gatewayStatus.state)){
-      const connect=await callApi('/api/connect',{method:'POST',body:'{}'});if(!connect.ok)throw new Error(connect.data?.message||'Falha na ligação ao master.');
-    }
-    let ready=false;
-    for(let attempt=0;attempt<60;attempt++){
-      const status=await callApi('/api/status');
-      if(status.data?.brandmeister?.state==='error')throw new Error(status.data.brandmeister.message);
-      if(status.data?.brandmeister?.connected&&status.data?.audioSidecar?.state==='ready'){ready=true;break;}
-      await new Promise(resolve=>setTimeout(resolve,250));
-    }
-    if(!ready)throw new Error('Aguarde autenticação e vocoder ficarem prontos.');
-    masterLinkInitialized=true;
     const result=await callApi('/api/link-talkgroup',{method:'POST',body:JSON.stringify({talkgroupId:Number(id),slot:group?.slot||settings.defaultSlot||1})});
-    if(!result.ok){masterLinkInitialized=false;throw new Error(result.data?.message||'Falha ao trocar TalkGroup.');}
+    if(!result.ok)throw new Error(result.data?.message||'Falha ao selecionar TalkGroup.');
     masterLinkInitialized=true;
   }finally{desktopTunePending--;}
+
 }
 async function selectGroup(id, options = {}) {
   if ((gatewayStatus.pttArmed||gatewayStatus.transmitting)&&!gatewayStatus.talkgroupBurstActive)return toast('Termine o PTT antes de trocar TG.');
@@ -550,7 +539,7 @@ async function selectGroup(id, options = {}) {
     if(!options.fromScan)toast(`A trocar para TG ${id}…`);
     await tuneSelectedTalkgroup(id);if(revision!==selectionRevision)return;
     renderGroups();if(!options.keepScreen)setActiveScreen('ptt');
-    if(!options.fromScan&&!mobileAudio?.isAndroid?.())toast(`TG ${id} sincronizada com o master.`);
+    if(!options.fromScan&&!mobileAudio?.isAndroid?.())toast(`TG ${id} selecionada sem transmitir. A receção depende do encaminhamento do master.`);
   }catch(error){toast(error.message);if(options.fromScan)stopTalkgroupScan();}
 }
 
@@ -717,7 +706,8 @@ function displayMobileStatus(data = {}) {
 function handleMobileRadioEvent(packet) {
   window.dispatchEvent(new CustomEvent('zapdmr:radio-event',{detail:packet}));
   const data = packet?.data || {};
-  if(packet?.event==='link')toast(data.message||'TalkGroup sincronizada.');
+  if(packet?.event==='link')toast(data.message||'TalkGroup selecionada em modo passivo.');
+  if(packet?.event==='audioFocus'){document.getElementById('audioState').textContent=data.message;}
   if (packet?.event === 'firmwareDownload') $('#mobileFirmwareHint').textContent = `A baixar ${data.file}: ${data.percent}%`;
   if (packet?.event === 'tot') updateTotStatus(data);
   if (packet?.event === 'status') displayMobileStatus(data);
@@ -796,7 +786,7 @@ async function init() {
   const androidAudioAvailable = Boolean(mobileAudio?.isAndroid?.());
   $('#mobileFirmwareSettings').hidden = !androidAudioAvailable;
   if (androidAudioAvailable) {
-    $('#aboutArchitecture').textContent = 'Android 1.3.1 · serviço HBP/UDP e áudio locais, com vocoder ARM64/ARMv7. Firmware incluído, instalado automaticamente ao abrir o aplicativo.';
+    $('#aboutArchitecture').textContent = 'Android 1.4.0 · serviço HBP/UDP e áudio locais, com vocoder ARM64/ARMv7. Firmware incluído, instalado automaticamente ao abrir o aplicativo.';
     try {
       await Promise.race([mobileAudio.initialize(handleMobileRadioEvent), new Promise((_, reject) => setTimeout(() => reject(new Error('O rádio ainda está a iniciar; o catálogo está disponível.')), 8000))]);
       mobileSecureConfig = await Promise.race([mobileAudio.loadRadioConfig(), new Promise((resolve) => setTimeout(() => resolve({}), 5000))]);

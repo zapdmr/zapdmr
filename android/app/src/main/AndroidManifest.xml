@@ -5,6 +5,7 @@
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
@@ -43,7 +44,7 @@
             android:enabled="true"
             android:exported="false"
             android:stopWithTask="false"
-            android:foregroundServiceType="connectedDevice|microphone" />
+            android:foregroundServiceType="connectedDevice|microphone|mediaPlayback" />
 
         <service
             android:name=".AprsService"

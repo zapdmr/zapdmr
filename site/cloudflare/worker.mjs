@@ -1,7 +1,7 @@
-import {handleApi, handleDownload, cleanup} from './api.mjs';
+import {handleApi, handleDownload, cleanup, discoverReleaseNotifications} from './api.mjs';
 import {publicPagePaths, renderPublicPage, sitemap} from '../public-pages.mjs';
 
-const assetsVersion = '20261020-otp-2';
+const assetsVersion = '20261020-chat-1';
 const aliases = {
   '/downloads': '/#downloads', '/downloads/': '/#downloads',
   '/recursos': '/#recursos', '/recursos/': '/#recursos',
@@ -49,7 +49,7 @@ async function route(request, env) {
   const origin = request.headers.get('Origin');
   if (origin && !allowedOrigin(origin, env.PUBLIC_ORIGIN, request.url)) return json(403, {message: 'Origem não autorizada.'});
   if (request.method === 'OPTIONS') return new Response(null, {status: 204});
-  if (pathname.startsWith('/v1/') || pathname === '/admin' || pathname === '/admin/') {
+  if (pathname.startsWith('/v1/') || pathname === '/admin' || pathname.startsWith('/admin/')) {
     return handleApi(request, env, url);
   }
   if (pathname.startsWith('/download/') || pathname === '/source') {
@@ -60,7 +60,7 @@ async function route(request, env) {
   if (pathname === '/healthz') {
     if (!env.DB) return json(503, {ok: false, message: 'Banco ainda não configurado.'});
     await env.DB.prepare('SELECT 1').first();
-    return json(200, {ok: true, version: '1.3.1'});
+    return json(200, {ok: true, version: '1.4.0'});
   }
   if (aliases[pathname]) return new Response(null, {status: 308, headers: {Location: aliases[pathname]}});
   const production = Boolean(env.OWNER_NAME && env.PRIVACY_EMAIL);
@@ -87,7 +87,7 @@ async function route(request, env) {
 
 export default {
   scheduled(event, env, ctx) {
-    ctx.waitUntil(cleanup(env));
+    ctx.waitUntil(Promise.allSettled([cleanup(env),discoverReleaseNotifications(env)]));
   },
   async fetch(request, env) {
     let response;

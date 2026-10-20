@@ -1370,37 +1370,14 @@ export async function startServer(options: StartOptions = {}) {
     finally{audioTestRunning=false;}
   });
   app.post('/api/link-talkgroup', async(req,res)=>{
-    const id=Number(req.body?.talkgroupId),slot:1|2=req.body?.slot===2?2:1;
+    const id=Number(req.body?.talkgroupId);
     if(!Number.isInteger(id)||id<1||id>0xffffff)return res.status(400).json({message:'TG inválida.'});
-    if(!gateway.status().connected)return res.status(409).json({message:'Aguarde autenticação no master.'});
-    if((gateway.status().pttArmed&&!gateway.status().talkgroupBurstActive)||audioTestRunning||disconnectTalkgroupPending)return res.status(409).json({message:'Termine PTT, teste ou desconexão antes de trocar TG.'});
-    voiceTarget=null;
-    if((settings.console as any)?.network?.autoOpenTalkgroup===false){rxTargetTalkgroupId=id;if(audioClient)try{audioClient.send(AudioSidecarMessage.clearRx);}catch{}return res.json({accepted:true,code:'TG_FILTER_ONLY',message:'Filtro local atualizado. Abertura automática desativada: o master precisa de uma subscrição estática ou de PTT.'});}
-    const revision=++linkRevision;linkRequests++;talkgroupBurstPending=true;talkgroupBurstPurpose='link';talkgroupBurstTalkgroupId=id;rxTargetTalkgroupId=id;
+    if(gateway.status().pttArmed||audioTestRunning||disconnectTalkgroupPending)return res.status(409).json({message:'Termine PTT ou teste antes de trocar TG.'});
+    voiceTarget=null;rxTargetTalkgroupId=id;++linkRevision;
     if(audioClient)try{audioClient.send(AudioSidecarMessage.clearRx);}catch{}
+    log(`TG ${id}: filtro RX passivo; nenhum DMRD de ativação enviado.`);
     broadcast('status',status());
-    const work=linkQueue.catch(()=>{}).then(async()=>{
-      if(revision!==linkRevision)return {accepted:true,code:'TG_SUPERSEDED',message:'Seleção substituída por uma TG mais recente.'};
-      if(!audioClient||audioSidecar.state!=='ready')throw new Error('Vocoder ainda não está pronto.');
-      const words=await requestSilenceCodewords(audioClient,audioLaunchGeneration);
-      const unlink=(settings.console as any)?.network?.unlinkBeforeTalkgroup===false&&id!==4000?{accepted:true,code:'UNLINK_DISABLED',message:'Desvinculação prévia desativada.'}:await gateway.sendDisconnectTalkgroup(linkedSlot,words);if(!unlink.accepted)return unlink;
-      if(id!==4000){
-        if(shuttingDown||!connectionWanted)throw new Error('Troca cancelada: sessão desligada.');
-        await gateway.disconnect(false);
-        if(revision!==linkRevision)return {accepted:true,code:'TG_SUPERSEDED',message:'Seleção substituída.'};
-        const connected=await gateway.connect(settings,hotspotPassword);if(!connected.accepted)return connected;
-        await new Promise(resolve=>setTimeout(resolve,1000));
-      }
-      if(revision!==linkRevision)return {accepted:true,code:'TG_SUPERSEDED',message:'Seleção substituída.'};
-      const result=id===4000?unlink:await gateway.sendTalkgroupBurst(id,slot,words);
-      if(result.accepted)linkedSlot=slot;
-      console.log(`[TG SWITCH] alvo ${id}, slot ${slot}: ${result.code}; RX restrito à TG selecionada.`);
-      log(`TG ${id}: ${result.code}`);
-      return result;
-    });linkQueue=work;
-    try{const result=await work;return res.status(result.accepted?200:resultStatus(result)).json(result);}
-    catch(error){return res.status(503).json({message:(error as Error).message});}
-    finally{if(--linkRequests===0){talkgroupBurstPending=false;talkgroupBurstPurpose=null;talkgroupBurstTalkgroupId=null;}broadcast('status',status());}
+    return res.json({accepted:true,code:'TG_FILTER_ONLY',message:'TG selecionada em modo passivo. Receção depende de TG estática no master ou do primeiro PTT.'});
   });
   app.post('/api/disconnect-talkgroup', async (_req, res) => {
     const currentGatewayStatus = gateway.status();

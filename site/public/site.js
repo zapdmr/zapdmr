@@ -305,7 +305,7 @@
       const flow = begin(number, String(fields.get('platform')));
       panel.removeAttribute('data-state');
       try {
-        const data = await post('/v1/registrations', {callsign: String(fields.get('callsign') || '').trim().toUpperCase(), dmrId: fields.get('dmrId'), whatsapp: number, platform: flow.platform, noticeAccepted: fields.get('noticeAccepted') === 'on', sharePhone: fields.get('sharePhone') === 'on', requestVerification: true});
+        const data = await post('/v1/registrations', {callsign: String(fields.get('callsign') || '').trim().toUpperCase(), dmrId: fields.get('dmrId'), whatsapp: number, platform: flow.platform, noticeAccepted: fields.get('noticeAccepted') === 'on', sharePhone: fields.get('sharePhone') === 'on', updateNotifications: fields.get('updateNotifications') === 'on', requestVerification: true});
         if (flow !== pending) return;
         if (typeof data.registrationId !== 'string' || !data.registrationId || data.verificationRequired !== true) throw new Error('O servidor não disponibilizou a confirmação do cadastro. O download permanece bloqueado.');
         flow.registrationId = data.registrationId;

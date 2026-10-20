@@ -16,10 +16,10 @@ $files = @(
     'README.md','LICENSE','server.mjs','public-pages.mjs','package.json',
     '.env.example','Caddyfile','zapdmr.service','VERIFICACAO-2026-10-19.md','VERIFICACAO-2026-10-20.md','AUTENTICACAO.md','WHATSAPP-OTP.md',
     'public/index.html','public/site.js','public/site.css','public/ZapDMR.png','public/_headers',
-    'cloudflare/api.mjs','cloudflare/worker.mjs','cloudflare/schema.sql',
+    'cloudflare/api.mjs','cloudflare/attachments.mjs','cloudflare/release-notifications.mjs','cloudflare/worker.mjs','cloudflare/schema.sql',
     'cloudflare/package.json','cloudflare/package-lock.json','cloudflare/wrangler.jsonc',
     'cloudflare/README.md','cloudflare/.gitignore','cloudflare/configure-secrets.mjs','cloudflare/configure-whatsapp-bridge.mjs',
-    'cloudflare/migrations/0001_whatsapp_otp.sql',
+    'cloudflare/migrations/0001_whatsapp_otp.sql','cloudflare/migrations/0002_zapchat_attachments.sql','cloudflare/migrations/0003_release_notifications.sql','ZAPCHAT-ANEXOS.md','AVISOS-VERSOES.md','VERIFICACAO-1.4.0.md',
     'whatsapp-bridge/bridge.mjs','whatsapp-bridge/dpapi.ps1','whatsapp-bridge/start-bridge.ps1',
     'whatsapp-bridge/package.json','whatsapp-bridge/package-lock.json','whatsapp-bridge/README.md','whatsapp-bridge/.gitignore'
 )

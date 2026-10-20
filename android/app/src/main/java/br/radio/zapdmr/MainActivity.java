@@ -26,9 +26,10 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(MobileAudioPlugin.class);
         registerPlugin(AprsPlugin.class);
+        registerPlugin(AttachmentsPlugin.class);
         super.onCreate(savedInstanceState);
         android.webkit.WebView webView=getBridge().getWebView();
         String agent=webView.getSettings().getUserAgentString();
-        if(!agent.contains("ZapDMR/"))webView.getSettings().setUserAgentString(agent+" ZapDMR/1.3.1");
+        if(!agent.contains("ZapDMR/"))webView.getSettings().setUserAgentString(agent+" ZapDMR/1.4.0");
     }
 }

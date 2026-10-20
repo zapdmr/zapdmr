@@ -99,23 +99,44 @@ public final class RadioSessionService extends Service {
     private boolean bluetoothAudioActive;
     private long lastPlaybackError;
     private long lastCodecFailure;
+    private volatile boolean audioFocusDelayed, audioFocusSuspended;
+    private volatile long lastFocusRequest;
+    private AudioAttributes rxAttributes(){return new AudioAttributes.Builder().setUsage(bluetoothAudioActive?AudioAttributes.USAGE_VOICE_COMMUNICATION:AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build();}
     private final android.media.AudioManager.OnAudioFocusChangeListener focusListener = change -> {
-        audioFocusGranted = change == android.media.AudioManager.AUDIOFOCUS_GAIN;
-        synchronized(playbackLock){
-            if(player!=null)try{if(audioFocusGranted)player.play();else player.pause();}catch(Exception error){Log.w(TAG,"Foco RX",error);}
-        }
+        boolean granted=change==android.media.AudioManager.AUDIOFOCUS_GAIN;
+        audioFocusGranted=granted;
+        audioFocusDelayed=!granted&&change!=android.media.AudioManager.AUDIOFOCUS_LOSS;
+        if(!granted)lastFocusRequest=System.currentTimeMillis();
+        synchronized(playbackLock){if(player!=null)try{player.pause();player.flush();}catch(Exception error){Log.w(TAG,"Foco RX",error);}}
+        audioFocusSuspended=!granted;
+        emit("audioFocus",json("available",granted,"message",granted?"Áudio RX retomado automaticamente.":"Áudio RX em pausa pelo Android; a receção continua. A aguardar liberação do foco."));
     };
     private boolean acquireAudioFocus(){
         if(audioFocusGranted)return true;
+        long now=System.currentTimeMillis();
+        if(audioFocusDelayed||now-lastFocusRequest<3000)return false;
+        lastFocusRequest=now;
         android.media.AudioManager manager=(android.media.AudioManager)getSystemService(AUDIO_SERVICE);
+        if(manager.getMode()==android.media.AudioManager.MODE_IN_CALL)return false;
         int result;
-        if(Build.VERSION.SDK_INT>=26){
-            if(focusRequest==null)focusRequest=new android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN)
-                .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
-                .setOnAudioFocusChangeListener(focusListener,controlsHandler).build();
-            result=manager.requestAudioFocus(focusRequest);
-        }else result=manager.requestAudioFocus(focusListener,android.media.AudioManager.STREAM_MUSIC,android.media.AudioManager.AUDIOFOCUS_GAIN);
-        return audioFocusGranted=result==android.media.AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+        try{
+            if(Build.VERSION.SDK_INT>=26){
+                if(focusRequest==null)focusRequest=new android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN)
+                    .setAudioAttributes(rxAttributes()).setAcceptsDelayedFocusGain(true).setWillPauseWhenDucked(true)
+                    .setOnAudioFocusChangeListener(focusListener,controlsHandler).build();
+                result=manager.requestAudioFocus(focusRequest);
+            }else result=manager.requestAudioFocus(focusListener,android.media.AudioManager.STREAM_MUSIC,android.media.AudioManager.AUDIOFOCUS_GAIN);
+        }catch(Exception error){Log.w(TAG,"Pedido de foco RX",error);result=android.media.AudioManager.AUDIOFOCUS_REQUEST_FAILED;}
+        audioFocusGranted=result==android.media.AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+        audioFocusDelayed=Build.VERSION.SDK_INT>=26&&result==android.media.AudioManager.AUDIOFOCUS_REQUEST_DELAYED;
+        if(!audioFocusGranted&&!audioFocusSuspended){audioFocusSuspended=true;emit("audioFocus",json("available",false,"message","Áudio RX em espera; a receção continua e será retomada quando o Android liberar o foco."));}
+        if(audioFocusGranted&&audioFocusSuspended){audioFocusSuspended=false;emit("audioFocus",json("available",true,"message","Áudio RX retomado automaticamente."));}
+        return audioFocusGranted;
+    }
+    private void abandonRxFocus(){
+        android.media.AudioManager manager=(android.media.AudioManager)getSystemService(AUDIO_SERVICE);
+        if(Build.VERSION.SDK_INT>=26&&focusRequest!=null)manager.abandonAudioFocusRequest(focusRequest);else manager.abandonAudioFocus(focusListener);
+        focusRequest=null;audioFocusGranted=false;audioFocusDelayed=false;audioFocusSuspended=false;lastFocusRequest=0;
     }
     private void releasePlayer(){synchronized(playbackLock){AudioTrack track=player;player=null;if(track!=null)try{track.pause();track.flush();track.release();}catch(Exception ignored){}}}
 
@@ -164,7 +185,7 @@ public final class RadioSessionService extends Service {
     private void requestLink(int tg,int slot){
         final long version=++selectionVersion;
         if(tg<1||tg>0xffffff||!connected||privateTargetId>0)return;
-        if(tg!=4000&&!networkFlag("autoOpenTalkgroup","autoOpenTalkgroup",true))return;
+        if(tg!=4000){releasePlayer();emitAudioLevel("RX",new byte[320],tg,0);stateMessage="TG "+tg+" selecionada em modo passivo. Receção depende da TG estática ou do primeiro PTT.";emit("link",json("talkgroupId",tg,"linked",false,"passive",true,"message",stateMessage));emitStatus();return;}
         pendingLinks.incrementAndGet();stopVoxMonitor();releasePlayer();emitAudioLevel("RX",new byte[320],tg,0);stateMessage="A trocar para TG "+tg+"…";emitStatus();
         linkWorker.execute(()->{
             try{
@@ -335,7 +356,7 @@ public final class RadioSessionService extends Service {
                 if(hasSco&&Build.VERSION.SDK_INT>=31){for(android.media.AudioDeviceInfo device:audio.getAvailableCommunicationDevices())if(device.getType()==android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO){audio.setCommunicationDevice(device);break;}}
                 else if(hasSco){audio.startBluetoothSco();audio.setBluetoothScoOn(true);}
             }else{bluetoothAudioActive=false;if(Build.VERSION.SDK_INT>=31)audio.clearCommunicationDevice();else{audio.stopBluetoothSco();audio.setBluetoothScoOn(false);}audio.setMode(android.media.AudioManager.MODE_NORMAL);}
-            bluetoothRoute=enabled;releasePlayer();emit("systemLog",RadioNotifications.record("audio",bluetoothAudioActive?"Rota de áudio Bluetooth SCO ativa":"Rota de áudio multimédia/altifalante ativa"));
+            bluetoothRoute=enabled;releasePlayer();abandonRxFocus();emit("systemLog",RadioNotifications.record("audio",bluetoothAudioActive?"Rota de áudio Bluetooth SCO ativa":"Rota de áudio multimédia/altifalante ativa"));
         }catch(Exception error){Log.w(TAG,"Rota Bluetooth indisponível",error);}
     }
     private void stopVoxMonitor(){voxMonitor=false;AudioRecord audio=voxRecorder;if(audio!=null)try{audio.stop();}catch(Exception ignored){}}
@@ -476,7 +497,7 @@ public final class RadioSessionService extends Service {
                         sendHbp(configPacket(hotspotId)); phase=3; state="waiting-config"; stateMessage="A enviar configuração do hotspot…"; emitStatus();
                     } else if (phase == 3) {
                         phase=4; connected=true;reconnectAttempt=0; controlsHandler.post(this::startVoxMonitor); lastMasterSeen=seen=System.currentTimeMillis(); state="connected";
-                        stateMessage="Ligado ao master; a sincronizar TG selecionada."; linkedTalkgroup=0; acquireWakeLock(); emitStatus();if(!transitionReconnect&&privateTargetId==0&&networkFlag("autoOpenTalkgroup","autoOpenTalkgroup",true))requestLink(selectedTalkgroup,selectedSlot);
+                        stateMessage="Ligado ao master; escuta passiva da TG selecionada."; linkedTalkgroup=0; acquireWakeLock(); emitStatus();
                     }
                     continue;
                 }
@@ -509,8 +530,10 @@ public final class RadioSessionService extends Service {
         VocoderHelper helper=ensureVocoder(); if(helper==null) return;
         if(radioNotifications!=null){JSONObject log=radioNotifications.onVoice(source,tg,ByteBuffer.wrap(packet,16,4).getInt()&0xffffffffL,individual,settings);if(log!=null)emit("systemLog",log);}
         byte[] slot=java.util.Arrays.copyOfRange(packet,20,53);
+        final long rxSelection=selectionVersion;
         for(byte[] ambe:DmrFrameEngine.extractVoice(slot)) {
             byte[] pcm=helper.decodeFec(ambe);
+            if(rxSelection!=selectionVersion)return;
             emitAudioLevel("RX", pcm, individual?source:tg, source);
             playPcm(pcm);
         }
@@ -604,13 +627,13 @@ public final class RadioSessionService extends Service {
 
     private boolean playPcm(byte[] pcm) {
         synchronized(playbackLock){try {
-            if(!acquireAudioFocus())throw new java.io.IOException("Foco de áudio indisponível; termine chamadas ou reprodução em outro aplicativo.");
+            if(!acquireAudioFocus())return false; // Drop stale PCM; HBP and vocoder keep receiving while focus is unavailable.
             int volume=Math.max(0,Math.min(200,settings.optInt("rxVolumePercent",100)));
             if(volume!=100){pcm=pcm.clone();for(int i=0;i+1<pcm.length;i+=2){int sample=(short)(((pcm[i+1]&255)<<8)|(pcm[i]&255));int scaled=Math.max(-32768,Math.min(32767,sample*volume/100));pcm[i]=(byte)scaled;pcm[i+1]=(byte)(scaled>>8);}}
             AudioTrack track=player;
             if(track==null||track.getState()!=AudioTrack.STATE_INITIALIZED){
                 int min=AudioTrack.getMinBufferSize(RATE,AudioFormat.CHANNEL_OUT_MONO,AudioFormat.ENCODING_PCM_16BIT);
-                track=new AudioTrack.Builder().setAudioAttributes(new AudioAttributes.Builder().setUsage(bluetoothAudioActive?AudioAttributes.USAGE_VOICE_COMMUNICATION:AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                track=new AudioTrack.Builder().setAudioAttributes(rxAttributes())
                     .setAudioFormat(new AudioFormat.Builder().setSampleRate(RATE).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
                     .setBufferSizeInBytes(Math.max(FRAME_BYTES*8,min>0?min:FRAME_BYTES*8)).setTransferMode(AudioTrack.MODE_STREAM).build();
                 track.play();player=track;
@@ -619,7 +642,7 @@ public final class RadioSessionService extends Service {
             track.setVolume(1.0f);
             if(track.write(pcm,0,pcm.length,AudioTrack.WRITE_BLOCKING)!=pcm.length)throw new java.io.IOException("A saída não aceitou o áudio PCM.");
             return true;
-        } catch(Exception error) { releasePlayer();emit("error",json("message","Falha na reprodução RX: "+safeMessage(error)));return false; }}
+        } catch(Exception error) { releasePlayer();if(System.currentTimeMillis()-lastPlaybackError>5000){lastPlaybackError=System.currentTimeMillis();emit("error",json("message","Falha na reprodução RX: "+safeMessage(error)));}return false; }}
     }
     private void runAudioTest(boolean microphone){
         if(ptt.get()||linking.get()||pendingLinks.get()>0||!testingAudio.compareAndSet(false,true)){emit("audioTest",json("ok",false,"message","Termine a transmissão ou o teste em curso antes de testar o áudio."));return;}
@@ -683,7 +706,7 @@ public final class RadioSessionService extends Service {
     private static int read24(byte[] in,int at){return ((in[at]&255)<<16)|((in[at+1]&255)<<8)|(in[at+2]&255);}
 
     private void startForegroundCompat(int id,Notification notification,int type) {
-        if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.Q)startForeground(id,notification,type);else startForeground(id,notification);
+        if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.Q)startForeground(id,notification,type|ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);else startForeground(id,notification);
     }
     private Notification notification(String text) {
         JSONObject console=settings.optJSONObject("console"),prefs=console==null?null:console.optJSONObject("notifications");
@@ -734,7 +757,7 @@ public final class RadioSessionService extends Service {
         stopVoxMonitor();stopPtt(); DatagramSocket active=socket;
         if(sendClose&&active!=null&&connected){try{long id=Long.parseLong(settings.getString("dmrId")+settings.getString("essid"));ByteArrayOutputStream close=new ByteArrayOutputStream();close.write("RPTCL".getBytes(StandardCharsets.US_ASCII));writeInt(close,id);synchronized(socketLock){active.send(new DatagramPacket(close.toByteArray(),close.size()));usageTxBytes.addAndGet(close.size());saveUsage(false);}}catch(Exception ignored){}}
         connected=false;closeSocket();Thread t=networkThread;networkThread=null;if(t!=null&&t!=Thread.currentThread()){t.interrupt();try{t.join(750);}catch(InterruptedException error){Thread.currentThread().interrupt();}}releaseWakeLock();
-        releasePlayer();
+        releasePlayer();abandonRxFocus();
         if(vocoder!=null){vocoder.stop();vocoder=null;}
     }
 

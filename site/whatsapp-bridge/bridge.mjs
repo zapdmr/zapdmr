@@ -105,6 +105,7 @@ function pruneDispatches(){
   while(otpMessages.size>100)otpMessages.delete(otpMessages.keys().next().value);
 }
 function rememberOtp(messageId,message){pruneDispatches();otpMessages.set(messageId,{at:Date.now(),message});while(otpMessages.size>100)otpMessages.delete(otpMessages.keys().next().value);}
+function acknowledgementRoute(record){return record.kind==='release'?'/v1/whatsapp/updates/ack':'/v1/whatsapp/bridge/ack';}
 async function flushReceiptAcks(){
   if(flushingReceipts)return;
   flushingReceipts=true;let changed=false;
@@ -116,10 +117,10 @@ async function flushReceiptAcks(){
         const leaseId=record.leaseId;
         // Always establish the submission ACK before its delivery ACK. An
         // early receipt merely updates this record until sendMessage ends.
-        if(record.submitted&&!record.submissionAcked){await api('/v1/whatsapp/bridge/ack',{id:record.jobId,status:'sent',leaseId});if(record.leaseId!==leaseId)continue;record.submissionAcked=true;changed=true;}
-        if(['delivered','failed'].includes(record.stage)&&record.receiptAcked!==record.stage){
+        if(record.submitted&&!record.submissionAcked){await api(acknowledgementRoute(record),{id:record.jobId,status:'sent',leaseId});if(record.leaseId!==leaseId)continue;record.submissionAcked=true;changed=true;}
+        if(['delivered','failed',...(record.kind==='release'?['unknown']:[])].includes(record.stage)&&record.receiptAcked!==record.stage){
           const receiptStage=record.stage;
-          await api('/v1/whatsapp/bridge/ack',{id:record.jobId,status:receiptStage,leaseId});if(record.leaseId!==leaseId)continue;record.receiptAcked=receiptStage;changed=true;
+          await api(acknowledgementRoute(record),{id:record.jobId,status:receiptStage,leaseId});if(record.leaseId!==leaseId)continue;record.receiptAcked=receiptStage;changed=true;
         }
       }catch{break;} // Retry metadata on the next tick; never resend an OTP here.
     }
@@ -152,9 +153,10 @@ async function incoming(event,sock){
     let content=message.message;
     for(let depth=0;depth<3&&content?.ephemeralMessage?.message;depth++)content=content.ephemeralMessage.message;
     const text=String(content?.conversation||content?.extendedTextMessage?.text||'').trim();
-    if(!/^ZapDMR CONFIRMAR [A-Za-z0-9_-]{43} \d{6}$/i.test(text))continue;
+    const stopUpdates=/^(STOP|PARAR|SAIR)$/i.test(text);
+    if(!stopUpdates&&!/^ZapDMR CONFIRMAR [A-Za-z0-9_-]{43} \d{6}$/i.test(text))continue;
     const number='+'+jid.split('@')[0];
-    try{const result=await api('/v1/whatsapp/webhook',{number,text});setState({lastIncomingAt:Date.now(),message:result.confirmed===false?'Mensagem recebida. O servidor não confirmou um desafio válido para este remetente.':'Confirmação recebida e encaminhada ao ZapDMR.'});}
+    try{const result=await api(stopUpdates?'/v1/whatsapp/updates/stop':'/v1/whatsapp/webhook',{number,text});setState({lastIncomingAt:Date.now(),message:stopUpdates?'Pedido para parar avisos de versões encaminhado. Os códigos de acesso continuam disponíveis.':result.confirmed===false?'Mensagem recebida. O servidor não confirmou um desafio válido para este remetente.':'Confirmação recebida e encaminhada ao ZapDMR.'});}
     catch{setState({message:'Não foi possível encaminhar uma confirmação. O usuário pode reenviar a mensagem pronta.'});}
   }
 }
@@ -182,6 +184,35 @@ async function connect(){
   })().catch(()=>{if(socket===sock)stopConnection('Não foi possível atualizar a conexão. Clique em Gerar QR / conectar para tentar novamente.');});});
 }
 const otpText=/^\*ZapDMR:\* Olá [A-Z0-9]{3,8}, seu código de confirmação de 6 dígitos é: \*\d{6}\*\. Forte 73!$/;
+const releaseText=/^\*ZapDMR:\* Olá [A-Z0-9]{3,8}, a versão v\d{1,4}\.\d{1,4}\.\d{1,4} já está disponível\. Baixe pelo site oficial: https:\/\/www\.zapdmr\.com\.br\/#downloads \. Para deixar de receber avisos, responda PARAR\. Forte 73!$/;
+async function pollReleaseNotices(){
+  const result=await api('/v1/whatsapp/updates/pull',{number:expectedNumber,connected:true});
+  for(const job of (Array.isArray(result.jobs)?result.jobs:[]).slice(0,1)){
+    if(!state.connected||!socket)return;
+    const id=String(job.id||''),number=String(job.number||''),text=String(job.text||''),leaseId=String(job.leaseId||'');
+    if(!/^[a-f0-9-]{36}$/i.test(id)||!/^[A-Za-z0-9_-]{43}$/.test(leaseId)||!/^[+][1-9]\d{7,14}$/.test(number)||job.kind!=='release'||!releaseText.test(text)){if(id&&leaseId)await api('/v1/whatsapp/updates/ack',{id,leaseId,status:'failed'}).catch(()=>{});continue;}
+    if(completed.has(id))continue; // Server also refuses a second /start.
+    let record,messageId,dispatchStarted=false;
+    try{
+      const sendingSocket=socket,destination=await resolveDestination(sendingSocket,number);
+      if(socket!==sendingSocket||!state.connected)throw new Error();
+      messageId=generateMessageIDV2(sendingSocket.user?.id);
+      record={kind:'release',jobId:id,leaseId,at:Date.now(),route:destination.route,stage:'pending',submitted:false,submissionFinished:false,submissionAcked:false,receiptAcked:null};
+      dispatches.set(messageId,record);rememberOtp(messageId,{conversation:text});await persist();
+      // Atomic start rechecks consent. Never retry a dispatch after this point,
+      // even if the socket/API loses the acknowledgement of the actual send.
+      const permission=await api('/v1/whatsapp/updates/start',{id,leaseId});if(!permission.allowed){dispatches.delete(messageId);otpMessages.delete(messageId);await persist();continue;}
+      dispatchStarted=true;completed.set(id,Date.now());for(const [key,at]of completed)if(at<Date.now()-86400000)completed.delete(key);while(completed.size>200)completed.delete(completed.keys().next().value);await persist();
+      const sent=await sendingSocket.sendMessage(destination.jid,{text},{messageId});
+      if(sent?.message&&record.stage!=='delivered'&&record.stage!=='failed')rememberOtp(messageId,sent.message);
+      record.submitted=true;record.submissionFinished=true;if(record.stage==='pending')record.stage='submitted';dispatchState(record,record.stage);await persist();await flushReceiptAcks();
+    }catch{
+      if(record&&dispatchStarted){record.submissionFinished=true;if(record.stage!=='delivered')record.stage='unknown';if(messageId)otpMessages.delete(messageId);dispatchState(record,record.stage);await persist().catch(()=>{});await flushReceiptAcks();}
+      else if(record){dispatches.delete(messageId);otpMessages.delete(messageId);await persist().catch(()=>{});}
+      setState({message:'Avisos de versões: resultado incerto não será reenviado automaticamente. Códigos de acesso têm prioridade.'});
+    }
+  }
+}
 async function poll(){
   if(polling||stopping||!state.connected||!socket||!sameOfficialNumber(sessionNumber(socket)))return;
   polling=true;
@@ -220,6 +251,9 @@ async function poll(){
         setState({message:'Não foi possível concluir o envio. O servidor será atualizado sem reenviar esta mensagem automaticamente.'});
       }
     }
+    // Optional announcements never delay an OTP batch. The server independently
+    // enforces one notice per 30 seconds, verified opt-in and a seven-day expiry.
+    if(!result.jobs.length&&state.connected&&socket)await pollReleaseNotices().catch(()=>{});
   }catch{setState({message:'WhatsApp conectado. A fila do servidor está indisponível; tentando novamente.'});}
   finally{polling=false;}
 }
