@@ -12,7 +12,7 @@ public class MainActivity extends BridgeActivity {
             boolean media=code==android.view.KeyEvent.KEYCODE_HEADSETHOOK||code==android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE;
             boolean matches=(key.equals("VolumeUp")&&code==android.view.KeyEvent.KEYCODE_VOLUME_UP)||(key.equals("VolumeDown")&&code==android.view.KeyEvent.KEYCODE_VOLUME_DOWN)||(key.equals("F9")&&code==android.view.KeyEvent.KEYCODE_F9);
             if(RadioSessionService.running&&(matches||(media&&options.optBoolean("bluetoothPtt")))){
-                String mode=options.optString("pttMode","hold");
+                String mode=options.optString("pttMode","toggle");
                 if(event.getRepeatCount()==0&&(event.getAction()==android.view.KeyEvent.ACTION_DOWN||mode.equals("hold"))){
                     String action=mode.equals("toggle")?RadioSessionService.ACTION_PTT_TOGGLE:event.getAction()==android.view.KeyEvent.ACTION_DOWN?RadioSessionService.ACTION_PTT_DOWN:RadioSessionService.ACTION_PTT_UP;
                     startService(new android.content.Intent(this,RadioSessionService.class).setAction(action));
@@ -30,6 +30,6 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(savedInstanceState);
         android.webkit.WebView webView=getBridge().getWebView();
         String agent=webView.getSettings().getUserAgentString();
-        if(!agent.contains("ZapDMR/"))webView.getSettings().setUserAgentString(agent+" ZapDMR/1.4.2");
+        if(!agent.contains("ZapDMR/"))webView.getSettings().setUserAgentString(agent+" ZapDMR/1.4.3");
     }
 }

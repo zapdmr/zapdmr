@@ -19,7 +19,7 @@
           <div class="heading"><div><p class="kicker">OPERAÇÃO DE VOZ</p><h2 id="pttScreenTitle">TalkGroup ativa</h2></div><button id="favoriteSelected" class="star" type="button" title="Favoritar">☆</button></div>
           <div class="selected"><i id="selectedActivityLed" class="activity-led" aria-label="Sem tráfego recente"></i><strong id="selectedId">TG 724</strong><div><b id="selectedName">Brasil Nacional</b><small id="selectedMeta">TS 1</small><small id="selectedCaller" class="activity-caller"></small></div><span id="selectedCategory" class="pill">Nacional</span></div>
           <button id="pttScan" class="passive-scan-card" type="button" aria-pressed="false"><span>◉ Recepção</span><b id="pttScanLabel">A procurar… · iniciar Scan</b><small>ODTP solicita inscrição sem áudio de ativação. O estado depende da resposta do servidor.</small></button>
-          <div class="quick-talkgroup-catalog"><nav id="quickCatalogFilters" class="quick-catalog-filters" aria-label="Filtrar lista rápida de TalkGroups"><button type="button" data-quick-catalog-filter="all" class="active" aria-pressed="true">Todas</button><button type="button" data-quick-catalog-filter="national" aria-pressed="false" title="TalkGroups nacionais, incluindo regiões e estados brasileiros">Nacionais</button><button type="button" data-quick-catalog-filter="world" aria-pressed="false">Mundiais</button></nav><label class="quick-talkgroup">Sintonizar TalkGroup<select id="quickTalkgroupSelect" aria-label="Selecionar TalkGroup ativa" aria-describedby="quickCatalogHint"></select></label><small id="quickCatalogHint" class="quick-catalog-hint">🟢 atividade recente · 🔴 sem atividade recente. Filtrar a lista não muda a TG atual.</small></div>
+          <div class="quick-talkgroup-catalog"><nav id="quickCatalogFilters" class="quick-catalog-filters" aria-label="Filtrar lista rápida de TalkGroups"><button type="button" data-quick-catalog-filter="all" class="active" aria-pressed="true">Todas</button><button type="button" data-quick-catalog-filter="national" aria-pressed="false" title="TalkGroups nacionais, incluindo regiões e estados brasileiros">Nacionais</button><button type="button" data-quick-catalog-filter="world" aria-pressed="false">Mundiais</button></nav><label class="quick-talkgroup">Sintonizar TalkGroup<button id="quickTalkgroupSelect" class="quick-talkgroup-control" type="button" aria-haspopup="dialog" aria-controls="quickTalkgroupDialog" aria-label="Selecionar TalkGroup ativa" aria-describedby="quickCatalogHint">TG 724 · Brasil Nacional</button></label><small id="quickCatalogHint" class="quick-catalog-hint">🟢 atividade recente · 🔴 sem atividade recente. Filtrar a lista não muda a TG atual.</small></div>
           <button id="ptt" class="button ptt ptt-large" type="button" disabled>🎙 Preparar PTT</button>
           <div id="audioMeters" class="audio-meter" aria-label="Medidores de modulação">
             <div class="audio-meter-row" role="meter" aria-label="Modulação TX" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><b>TX</b><div id="txAudioMeterSegments" class="audio-meter-segments" aria-hidden="true"></div><span id="txAudioMeterValue" class="audio-meter-value">— dBFS</span></div>
@@ -27,7 +27,7 @@
             <small id="audioMeterCaller" class="audio-meter-caller"></small>
           </div>
           <p id="totState" class="tot-state hint tiny" hidden></p>
-          <p class="operation-hint">Toque e segure o PTT para transmitir na TG selecionada. Trocar de TG não transmite. O primeiro PTT pode ativar a TG no master.</p>
+          <p class="operation-hint">Toque no PTT para começar e toque novamente para parar. Trocar de TG não transmite.</p>
         </section>
         <section class="card participants-card"><div class="heading"><div><p class="kicker">LAST HEARD · RODADA ATUAL</p><h2>Participantes da Rodada</h2></div><span id="participantCount" class="pill">0</span></div>
           <div class="participant-table-wrap"><table class="participant-table"><thead><tr><th>Hora</th><th>Indic.</th><th>Nome</th><th>Localização</th></tr></thead><tbody id="participantsRows"></tbody></table></div>
@@ -153,6 +153,14 @@
     <button class="bottom-nav-button" type="button" data-screen="connection"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22V4m-5 18 5-9 5 9M8 8a5.7 5.7 0 0 1 0 8m8-8a5.7 5.7 0 0 0 0 8M4.5 4.5a10.6 10.6 0 0 1 0 15m15-15a10.6 10.6 0 0 0 0 15"></path></svg><span>Ligação</span></button>
     <button class="bottom-nav-button" type="button" data-screen="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"></path><path d="m19.4 15 .1.1a1.7 1.7 0 0 1-2.4 2.4l-.1-.1a1.7 1.7 0 0 0-2.9 1.2v.2a1.7 1.7 0 0 1-3.4 0v-.2a1.7 1.7 0 0 0-2.9-1.2l-.1.1a1.7 1.7 0 0 1-2.4-2.4l.1-.1a1.7 1.7 0 0 0-1.2-2.9H4a1.7 1.7 0 0 1 0-3.4h.2a1.7 1.7 0 0 0 1.2-2.9l-.1-.1a1.7 1.7 0 0 1 2.4-2.4l.1.1a1.7 1.7 0 0 0 2.9-1.2V2a1.7 1.7 0 0 1 3.4 0v.2a1.7 1.7 0 0 0 2.9 1.2l.1-.1a1.7 1.7 0 0 1 2.4 2.4l-.1.1a1.7 1.7 0 0 0 1.2 2.9h.2a1.7 1.7 0 0 1 0 3.4h-.2a1.7 1.7 0 0 0-1.2 2.9Z"></path></svg><span>Definições</span></button>
   </nav>
+  <dialog id="quickTalkgroupDialog" class="tg-picker-dialog" aria-labelledby="quickTalkgroupTitle">
+    <div class="tg-picker-head"><h2 id="quickTalkgroupTitle">Selecionar TalkGroup</h2><button id="quickTalkgroupClose" type="button" aria-label="Fechar seleção de TalkGroup" autofocus>×</button></div>
+    <nav class="tg-picker-filters" aria-label="Categorias da seleção de TalkGroup"><button type="button" data-picker-filter="all">Todas</button><button type="button" data-picker-filter="national">Nacionais</button><button type="button" data-picker-filter="world">Mundiais</button></nav>
+    <input id="quickTalkgroupSearch" type="search" placeholder="Buscar TG ou nome" aria-label="Buscar TalkGroup" autocomplete="off">
+    <div id="quickTalkgroupOptions" class="tg-picker-options" role="group" aria-label="TalkGroups disponíveis"></div>
+    <p id="quickTalkgroupEmpty" class="hint" hidden>Nenhuma TG encontrada.</p>
+    <p class="tg-picker-note">A lista permanece estável enquanto você escolhe. As cores mostram a atividade ao abrir.</p>
+  </dialog>
   <dialog id="talkgroupDialog" class="talkgroup-dialog">
     <form id="talkgroupForm">
       <div><p class="kicker">CATÁLOGO DE TALKGROUPS</p><h2>Cadastrar TalkGroup</h2></div>

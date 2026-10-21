@@ -7,7 +7,7 @@
 .operation-card .selected>div b{font-size:calc(14px * var(--rc-activeCall-scale))}
 .operation-card .selected small{font-size:calc(10px * var(--rc-activeCall-scale))}
 .participant-table{font-size:calc(11px * var(--rc-activity-scale))}
-.quick-talkgroup select{font-size:calc(11px * var(--rc-destination-scale))}
+.quick-talkgroup select,.quick-talkgroup-control{font-size:calc(11px * var(--rc-destination-scale))}
 .operation-card .ptt-large{font-size:calc(20px * var(--rc-ptt-scale));line-height:1.2;white-space:normal}
 #participantsRows td[data-column="callsign"]{cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px}
 .rc-top-contact{width:32px;height:32px;padding:0;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--green-text);font-size:18px;flex:0 0 auto}
@@ -107,7 +107,7 @@
  .operation-card .selected>strong{font-size:calc(17px * var(--rc-activeCall-scale))}
  .operation-card .selected>div b{font-size:calc(12px * var(--rc-activeCall-scale))}
  .participant-table{font-size:calc(9px * var(--rc-activity-scale))}
- .quick-talkgroup select{font-size:calc(10px * var(--rc-destination-scale))}
+ .quick-talkgroup select,.quick-talkgroup-control{font-size:calc(10px * var(--rc-destination-scale))}
  .operation-card .ptt-large{font-size:calc(17px * var(--rc-ptt-scale))}
  .rc-dialog{width:calc(100vw - 14px);height:calc(100dvh - 24px);border-radius:14px}
  .rc-dialog-head{padding:10px 12px}

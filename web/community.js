@@ -42,7 +42,7 @@
     el('communityOtpReverseCode').textContent=`Código da mensagem pronta: ${reverseCode}. Apenas a mensagem recebida do seu número autoriza a confirmação.`;
     el('communityOtpMode').hidden=challenge.mode!=='development';
     el('communityOtpMode').textContent=challenge.mode==='development'?'HOMOLOGAÇÃO LOCAL · este código não confirma a titularidade do WhatsApp e não cria um operador verificado em produção.':'';
-    el('communityOtpTimer').textContent=unavailable?'A entrega de códigos ainda não está disponível neste servidor.':expires?`Expira em ${Math.floor(expires/60)}:${String(expires%60).padStart(2,'0')}. ${remaining?`Novo pedido em ${remaining}s.`:'Pode solicitar outro código.'}`:'Código expirado. Solicite outro código para continuar.';
+    el('communityOtpTimer').textContent=unavailable?(challenge.reason==='rate_limited'?(remaining?`Novo pedido permitido em ${remaining}s.`:'Pode solicitar outro código.'):'A confirmação está temporariamente indisponível. Use Reenviar código para tentar novamente.'):expires?`Expira em ${Math.floor(expires/60)}:${String(expires%60).padStart(2,'0')}. ${remaining?`Novo pedido em ${remaining}s.`:'Pode solicitar outro código.'}`:'Código expirado. Solicite outro código para continuar.';
     if(!unavailable&&!expires)stopChallengeActivity();
   }
   function setChallenge(value,update=false){
@@ -53,7 +53,7 @@
     if(next.mode==='development'&&!/^http:\/\/(localhost|127\.0\.0\.1):\d{1,5}$/.test(endpoint()))next={mode:'unavailable',message:'O modo de homologação só é permitido num servidor local explícito.'};
     challenge=next;
     expiresAt=Date.now()+Math.min(600,Math.max(0,Number(next.expiresInSeconds)||0))*1000;
-    retryUntil=Math.max(update?previousRetry:0,Date.now()+Math.max(update?0:60,Number(next.retryAfterSeconds)||0)*1000);
+    retryUntil=Math.max(update?previousRetry:0,Date.now()+Math.max(update?0:1,Number(next.retryAfterSeconds)||0)*1000);
     el('communityOtpInstructions').textContent=next.mode==='reverse'?`Envie a mensagem pronta a partir do WhatsApp ${config.phone}. A validação só ocorre depois que o servidor confirmar a mensagem recebida desse número. Ver o código não confirma o telefone.`:next.mode==='bridge'?`O pedido está na fila de envio para ${config.phone}. Aguarde o código no WhatsApp e digite os 6 dígitos abaixo. O envio ainda não foi confirmado.`:next.mode==='development'?`Código de homologação: ${/^\d{6}$/.test(String(next.displayCode||''))?next.displayCode:'indisponível'}. Use apenas neste ambiente de demonstração.`:next.mode==='direct'?(next.sent?`Digite o código enviado para ${config.phone}. Ele é válido por 10 minutos.`:`A entrega para ${config.phone} ainda não foi confirmada. Digite os 6 dígitos quando receber o código.`):(next.message||'A entrega de códigos ainda não está configurada.');
     accountStatus(next.message||(next.mode==='direct'&&next.sent?'Código enviado. Confirme abaixo.':next.mode==='bridge'?'Pedido na fila. Aguardando envio pelo WhatsApp.':'Aguardando confirmação do número.'));
     renderChallenge();startChallengeActivity();

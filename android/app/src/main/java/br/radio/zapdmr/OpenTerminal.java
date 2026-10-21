@@ -36,7 +36,7 @@ final class OpenTerminal {
     synchronized String message(){return message;}
     synchronized int target(){return target;}
     synchronized void start(int target) throws Exception{this.target=target;seen=System.currentTimeMillis();status("connecting","Conectando ao servidor ODTP…");keepalive();}
-    private void keepalive() throws Exception{byte[] description="ZapDMR 1.4.2".getBytes(StandardCharsets.US_ASCII);ByteBuffer data=ByteBuffer.allocate(5+description.length).order(ByteOrder.LITTLE_ENDIAN);data.putInt(id).put((byte)0x21).put(description);send(0,data.array());pingAt=System.currentTimeMillis();}
+    private void keepalive() throws Exception{byte[] description="ZapDMR 1.4.3".getBytes(StandardCharsets.US_ASCII);ByteBuffer data=ByteBuffer.allocate(5+description.length).order(ByteOrder.LITTLE_ENDIAN);data.putInt(id).put((byte)0x21).put(description);send(0,data.array());pingAt=System.currentTimeMillis();}
     synchronized void select(int target,boolean individual) throws Exception{
         int peer=individual?target:0;if(this.target==target&&privatePeer==peer&&!"error".equals(receptionState)&&!"disconnected".equals(receptionState))return;
         this.target=target;privatePeer=peer;revision++;source=destination=0;

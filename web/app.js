@@ -20,8 +20,8 @@ let disconnectInProgress = false;
 let talkgroupBurstStatus = { pending: false, purpose: null, talkgroupId: null };
 const audioMeterResetTimers = { TX: undefined, RX: undefined };
 const audioLevels = { TX: 0, RX: 0 };
-let categoryValue = 'all';
-let quickCatalogScope = 'all';
+let categoryValue = 'Nacionais';
+let quickCatalogScope = 'national';
 let activityFilter = 'all';
 let catalogActivitySignature = '';
 let scanEnabled = false;
@@ -199,27 +199,11 @@ function matchesCatalogCategory(group, category) {
 }
 
 function renderQuickTalkgroups() {
-  const select = $('#quickTalkgroupSelect');
   const visible = groups.filter(group => quickCatalogScope === 'national' ? isNationalGroup(group)
     : quickCatalogScope === 'world' ? catalogCategory(group) === 'Mundiais' : true);
   const current = groups.find(group => group.id === Number(settings.selectedTalkgroupId));
   const outside = current && !visible.includes(current);
-  const sections = [];
-  const section = (label, values) => {
-    if (!values.length) return;
-    const optgroup = document.createElement('optgroup');
-    optgroup.label = label;
-    for (const group of values) {
-      const option = new Option(`TG ${group.id} · ${group.name}`, String(group.id));
-      if (outside && group.id === current.id) option.dataset.outsideFilter = 'true';
-      optgroup.append(option);
-    }
-    sections.push(optgroup);
-  };
-  const displayed = outside ? [current, ...visible] : visible;
-  for (const category of catalogCategories()) section(category, displayed.filter(group => catalogCategory(group) === category));
-  select.replaceChildren(...sections);
-  select.value = String(settings.selectedTalkgroupId);
+  updateQuickTalkgroupIndicators();
   document.querySelectorAll('[data-quick-catalog-filter]').forEach(button => {
     const active = button.dataset.quickCatalogFilter === quickCatalogScope;
     button.classList.toggle('active', active);
@@ -227,6 +211,46 @@ function renderQuickTalkgroups() {
   });
   const hint = $('#quickCatalogHint');
   if (hint) hint.textContent = `${visible.length} TGs nesta lista · 🟢 atividade recente · 🔴 sem atividade recente. Filtrar não muda a TG atual.${outside ? ` TG ${current.id} mantida, fora do filtro.` : ''}`;
+}
+
+// Freeze catalog, selection and activity when opening. Network refreshes never
+// replace a row under the operator's finger or reset the dialog scroll position.
+let quickPickerSnapshot = [], quickPickerSelectedId = 0, quickPickerScope = 'all';
+function openQuickTalkgroupPicker() {
+  if ($('#quickTalkgroupDialog').open) return;
+  quickPickerSnapshot = groups.map(group => ({...group, category: catalogCategory(group), active: hasRecentActivity(group.id)}));
+  quickPickerSelectedId = Number(settings.selectedTalkgroupId);
+  quickPickerScope = quickCatalogScope;
+  $('#quickTalkgroupSearch').value = '';
+  renderQuickTalkgroupPicker();
+  $('#quickTalkgroupDialog').showModal();
+}
+function renderQuickTalkgroupPicker() {
+  const query = $('#quickTalkgroupSearch').value.trim().toLocaleLowerCase('pt-BR');
+  const visible = quickPickerSnapshot.filter(group =>
+    (quickPickerScope === 'all' || group.category === (quickPickerScope === 'national' ? 'Nacionais' : 'Mundiais')) &&
+    (!query || `${group.id} ${group.name}`.toLocaleLowerCase('pt-BR').includes(query)));
+  const rows = visible.map(group => {
+    const row = document.createElement('button');
+    row.type = 'button'; row.className = 'tg-picker-row'; row.dataset.talkgroupId = String(group.id);
+    row.setAttribute('aria-pressed', String(group.id === quickPickerSelectedId));
+    row.title = `TG ${group.id} · ${group.name}`;
+    const led = document.createElement('i'); led.className = `tg-picker-led${group.active ? ' active' : ''}`;
+    led.setAttribute('aria-label', group.active ? 'Atividade recente' : 'Sem atividade recente');
+    const id = document.createElement('b'); id.textContent = `TG ${group.id}`;
+    const name = document.createElement('span'); name.className = 'tg-picker-name'; name.textContent = group.name;
+    const mark = document.createElement('span'); mark.className = 'tg-picker-check'; mark.textContent = group.id === quickPickerSelectedId ? '✓' : '';
+    mark.setAttribute('aria-hidden', 'true'); row.append(led,id,name,mark);
+    row.onclick = () => { $('#quickTalkgroupDialog').close(); void selectGroup(group.id); };
+    return row;
+  });
+  $('#quickTalkgroupOptions').replaceChildren(...rows);
+  $('#quickTalkgroupOptions').scrollTop = 0;
+  $('#quickTalkgroupEmpty').hidden = rows.length > 0;
+  document.querySelectorAll('[data-picker-filter]').forEach(button => {
+    const active = button.dataset.pickerFilter === quickPickerScope;
+    button.classList.toggle('active',active); button.setAttribute('aria-pressed',String(active));
+  });
 }
 
 function hasRecentActivity(id) {
@@ -249,11 +273,9 @@ function setLedState(led, active) {
 }
 
 function updateQuickTalkgroupIndicators(){
-  for(const option of $('#quickTalkgroupSelect').options){
-    const group=groups.find(item=>item.id===Number(option.value));if(!group)continue;
-    const active=hasRecentActivity(group.id),outside=option.dataset.outsideFilter==='true';option.textContent=`${active?'🟢':'🔴'} TG ${group.id} · ${group.name}${outside?' · atual fora do filtro':''}`;
-    option.setAttribute('aria-label',`TG ${group.id}, ${group.name}, ${active?'atividade nos últimos 60 segundos':'sem atividade recente'}${outside?', atual fora do filtro':''}`);
-  }
+  const button=$('#quickTalkgroupSelect'),group=groupSelected();if(!group)return;
+  const label=`${hasRecentActivity(group.id)?'🟢':'🔴'} TG ${group.id} · ${group.name}`;
+  if(button.textContent!==label)button.textContent=label;
 }
 function updateActivityDots() {
   updateQuickTalkgroupIndicators();
@@ -313,7 +335,7 @@ function renderSelected() {
   selectedCaller.hidden = !selectedCaller.textContent;
   $('#selectedCategory').textContent = categoryName(catalogCategory(group));
   $('#favoriteSelected').textContent = settings.favorites.includes(group.id) ? '★' : '☆';
-  $('#quickTalkgroupSelect').value = String(group.id);
+  updateQuickTalkgroupIndicators();
   $('#selectedActivityLed').dataset.talkgroupId = String(group.id);
   setLedState($('#selectedActivityLed'), hasRecentActivity(group.id));
   renderParticipants();
@@ -842,7 +864,7 @@ async function init() {
   const androidAudioAvailable = Boolean(mobileAudio?.isAndroid?.());
   $('#mobileFirmwareSettings').hidden = !androidAudioAvailable;
   if (androidAudioAvailable) {
-    $('#aboutArchitecture').textContent = 'Android 1.4.2 · serviço HBP/UDP e áudio locais, com vocoder ARM64/ARMv7. Firmware incluído, instalado automaticamente ao abrir o aplicativo.';
+    $('#aboutArchitecture').textContent = 'Android 1.4.3 · serviço HBP/UDP e áudio locais, com vocoder ARM64/ARMv7. Firmware incluído, instalado automaticamente ao abrir o aplicativo.';
     try {
       await Promise.race([mobileAudio.initialize(handleMobileRadioEvent), new Promise((_, reject) => setTimeout(() => reject(new Error('O rádio ainda está a iniciar; o catálogo está disponível.')), 8000))]);
       mobileSecureConfig = await Promise.race([mobileAudio.loadRadioConfig(), new Promise((resolve) => setTimeout(() => resolve({}), 5000))]);
@@ -992,10 +1014,13 @@ $('#downloadDmrFirmware').onclick = () => void importMobileFirmware('application
 $('#downloadCoreFirmware').onclick = () => void importMobileFirmware('core', true);
 $('#importDmrFirmware').onclick = () => void importMobileFirmware('application');
 $('#importCoreFirmware').onclick = () => void importMobileFirmware('core');
-$('#quickTalkgroupSelect').onchange = (event) => {
-  const id = Number(event.target.value);
-  if (Number.isInteger(id) && id > 0) void selectGroup(id);
-};
+$('#quickTalkgroupSelect').onclick = openQuickTalkgroupPicker;
+$('#quickTalkgroupClose').onclick = () => $('#quickTalkgroupDialog').close();
+$('#quickTalkgroupSearch').oninput = renderQuickTalkgroupPicker;
+$('#quickTalkgroupDialog').addEventListener('close', () => { quickPickerSnapshot=[]; });
+document.querySelectorAll('[data-picker-filter]').forEach(button => {
+  button.onclick = () => { quickPickerScope=button.dataset.pickerFilter; renderQuickTalkgroupPicker(); };
+});
 document.querySelectorAll('[data-quick-catalog-filter]').forEach(button => {
   button.onclick = () => {
     quickCatalogScope = button.dataset.quickCatalogFilter;

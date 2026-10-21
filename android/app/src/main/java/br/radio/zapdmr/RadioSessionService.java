@@ -253,7 +253,7 @@ public final class RadioSessionService extends Service {
                 if(key==null||!controls().optBoolean("bluetoothPtt")||!remoteAllowed())return false;
                 if(key.getKeyCode()!=android.view.KeyEvent.KEYCODE_HEADSETHOOK&&key.getKeyCode()!=android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE&&key.getKeyCode()!=android.view.KeyEvent.KEYCODE_MEDIA_PLAY)return false;
                 if(key.getRepeatCount()!=0)return true;
-                if(controls().optString("pttMode","hold").equals("toggle")){if(key.getAction()==android.view.KeyEvent.ACTION_DOWN)togglePtt();}
+                if(controls().optString("pttMode","toggle").equals("toggle")){if(key.getAction()==android.view.KeyEvent.ACTION_DOWN)togglePtt();}
                 else if(key.getAction()==android.view.KeyEvent.ACTION_DOWN)startPtt(selectedTalkgroup,selectedSlot);else stopPtt();
                 return true;
             }

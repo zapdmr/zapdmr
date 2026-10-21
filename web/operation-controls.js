@@ -1,6 +1,6 @@
 /* Shared operational settings for the native Android client and Electron. */
 (() => {
-  const prefDefaults = { pttMode:'hold', hardwareKey:'F9', bluetoothPtt:false, allowLocked:false,
+  const prefDefaults = { pttMode:'toggle', hardwareKey:'F9', bluetoothPtt:false, allowLocked:false,
     hidePttButton:false, beepStart:false, beepStop:false, beepIncoming:false, keepScreenOn:false,
     hideStatusBar:false, showMeters:true, voxEnabled:false, voxThreshold:-35, voxHangMs:1200,
     columns:{time:true,callsign:true,name:true,location:true,city:true,state:true,country:true,talkgroup:false,flags:true,splitLocation:false} };
@@ -16,7 +16,7 @@
   }
   const pttPane=document.createElement('section');pttPane.className='settings-pane settings-grid';pttPane.dataset.settingsPane='ptt-options';pttPane.hidden=true;
   pttPane.innerHTML=`<div class="settings-card"><h3>Premir para falar</h3><p class="hint tiny">Modo, botões, tons</p>
-    <label>Modo do botão de falar<select id="pttMode"><option value="hold">Manter — manter premido para transmitir</option><option value="toggle">Tocar — um toque liga, outro desliga</option></select></label>
+    <label>Modo do botão de falar<select id="pttMode"><option value="toggle">Tocar — um toque liga, outro desliga</option><option value="hold">Manter — manter premido para transmitir</option></select></label>
     <label>Mapeamento do botão físico<select id="hardwareKey"><option value="F9">F9</option><option value="VolumeUp">Volume + (Android)</option><option value="VolumeDown">Volume − (Android)</option></select></label>
     ${switchRow('bluetoothPtt','PTT Bluetooth / botão de auscultadores')}
     <p class="hint tiny">Botões de média ou HID padrão. A compatibilidade depende do acessório e do sistema. F9 global no Windows alterna TX.</p>

@@ -7,6 +7,8 @@ Decisão do responsável pelo ZapDMR em 20/10/2026, após confirmar o funcioname
 - Rede BrandMeister, protocolo **Open DMR Terminal / ODTP**.
 - Master Brasil **7242.master.brandmeister.network**, UDP **54006**.
 - TG inicial **724 — Brasil Nacional**.
+- Modo padrão do PTT **Tocar — um toque liga, outro desliga**; preservar uma escolha explícita já salva.
+- Abrir os seletores de TG em **Nacionais**, mantendo Mundiais e TGs personalizadas disponíveis pelos filtros. O pop-up mantém linhas e indicadores estáveis enquanto estiver aberto.
 - Ligar automaticamente com perfil completo e senha guardada; reconexão automática habilitada, com limite de tentativas.
 - Ao guardar o perfil completo, iniciar a conexão quando a opção de ligação automática estiver habilitada e não houver outra sessão em andamento.
 - Sintonizar uma TG envia inscrição/cancelamento ODTP, sem PTT, portadora silenciosa ou TG 4000. O PTT é reservado à voz solicitada pelo operador.

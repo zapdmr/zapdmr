@@ -124,7 +124,7 @@
     flow.challengeToken = typeof challenge.challengeToken === 'string' ? challenge.challengeToken : '';
     flow.displayCode = ['reverse', 'development'].includes(flow.mode) && /^\d{6}$/.test(challenge.displayCode || '') ? challenge.displayCode : '';
     flow.expiresAt = Date.now() + seconds(challenge.expiresInSeconds, 600) * 1000;
-    flow.retryAt = Date.now() + Math.max(fromPoll ? 0 : 60, seconds(challenge.retryAfterSeconds, 60, 3600)) * 1000;
+    flow.retryAt = Date.now() + Math.max(fromPoll ? 0 : 1, seconds(challenge.retryAfterSeconds, 60, 3600)) * 1000;
     codeInput.value = flow.mode === 'reverse' ? flow.displayCode : '';
     codeInput.readOnly = flow.mode === 'reverse';
     codeInput.setCustomValidity('');
@@ -140,7 +140,7 @@
         : challenge.sent ? 'Código enviado. Digite os seis dígitos recebidos no seu WhatsApp.'
           : 'Não foi possível entregar o código. O cadastro foi preservado; aguarde para reenviar ou corrija o número.';
     const message = typeof challenge.message === 'string' && challenge.message.length <= 500 ? challenge.message : fallback;
-    report(message + (flow.mode === 'unavailable' ? ' O responsável pelo ZapDMR precisa habilitar o serviço de confirmação do WhatsApp. O download permanece bloqueado.' : ''), flow.mode === 'unavailable' || (flow.mode === 'direct' && !challenge.sent));
+    report(message, flow.mode === 'unavailable' || (flow.mode === 'direct' && !challenge.sent));
     refreshControls();
     if (['reverse', 'bridge'].includes(flow.mode)) {
       if (!flow.challengeToken || (flow.mode === 'reverse' && !flow.displayCode)) {
@@ -252,7 +252,7 @@
     try { applyChallenge(await post('/v1/auth/request-code', {registrationId: flow.registrationId}), flow); }
     catch (error) {
       if (flow === pending) {
-        flow.retryAt = Date.now() + Math.max(60, seconds(error.retryAfterSeconds, 60, 3600)) * 1000;
+        flow.retryAt = Date.now() + Math.max(1, seconds(error.retryAfterSeconds, 60, 3600)) * 1000;
         report((error.message || 'O código não foi reenviado.') + ' O cadastro foi preservado.', true);
       }
     } finally { busy(false, flow); if (flow === pending) schedulePoll(flow); }

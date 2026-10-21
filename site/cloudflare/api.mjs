@@ -75,7 +75,7 @@ async function rate(config,request,bucket,max=60,period=60000,identity){
   const now=Date.now(),row=await config.db.prepare(`INSERT INTO rate_limits(bucket,identity,n,expires_at) VALUES(?,?,1,?)
     ON CONFLICT(bucket,identity) DO UPDATE SET n=CASE WHEN rate_limits.expires_at<=? THEN 1 ELSE rate_limits.n+1 END,
     expires_at=CASE WHEN rate_limits.expires_at<=? THEN excluded.expires_at ELSE rate_limits.expires_at END RETURNING n,expires_at`).bind(bucket,subject,now+period,now,now).first();
-  if(row.n>max)throw failure(429,'Muitas tentativas. Aguarde alguns minutos.');
+  if(row.n>max)throw failure(429,'Muitas tentativas. Aguarde o prazo informado antes de tentar novamente.',{reason:'rate_limited',retryAfterSeconds:Math.max(1,Math.ceil((row.expires_at-now)/1000))});
 }
 async function currentUser(config,request){
   const token=(request.headers.get('Authorization')||'').replace(/^Bearer /,'');
@@ -174,7 +174,7 @@ export async function handleApi(request,env,url=new URL(request.url)){
 async function api(request,env,url,config){
   const route=url.pathname,method=request.method,db=config.db;
   const noticeResponse=await releaseNotices.handleApi(request,env,url,config);if(noticeResponse)return noticeResponse;
-  if(route==='/v1/status'&&method==='GET'){const mode=await verificationMode(config,env);return json(200,{version:'1.4.2',chatAttachments:true,maxAttachmentBytes:15728640,registration:true,verificationConfigured:mode!=='unavailable',verificationMode:mode,developmentMode:false,bridgeConnected:await bridgeConnected(config,env),downloadRequiresVerification:true,owner:env.OWNER_NAME,privacyEmail:env.PRIVACY_EMAIL,downloads:{android:downloadMetadata(env,config,'android'),windows:downloadMetadata(env,config,'windows')}});}
+  if(route==='/v1/status'&&method==='GET'){const mode=await verificationMode(config,env);return json(200,{version:'1.4.3',chatAttachments:true,maxAttachmentBytes:15728640,registration:true,verificationConfigured:mode!=='unavailable',verificationMode:mode,developmentMode:false,bridgeConnected:await bridgeConnected(config,env),downloadRequiresVerification:true,owner:env.OWNER_NAME,privacyEmail:env.PRIVACY_EMAIL,downloads:{android:downloadMetadata(env,config,'android'),windows:downloadMetadata(env,config,'windows')}});}
   if(route.startsWith('/v1/whatsapp/')&&method==='POST'){
     await bridgeAuth(config,env,request);await rate(config,request,'whatsapp-bridge',120);const raw=await body(request),now=Date.now();
     if(route==='/v1/whatsapp/webhook'){
@@ -226,7 +226,7 @@ async function api(request,env,url,config){
     await releaseNotices.registrationConsent(config,registrationId,raw.updateNotifications);
     const available=Boolean(config.downloads[platform]),row=await db.prepare('SELECT * FROM registrations WHERE id=?').bind(registrationId).first();
     let challenge;
-    if(raw.requestVerification===true)try{challenge=await issueChallenge(config,env,request,row);}catch(error){if(error.status!==429)throw error;challenge={mode:'unavailable',sent:false,expiresInSeconds:600,retryAfterSeconds:error.retryAfterSeconds||60,message:error.message};}
+    if(raw.requestVerification===true)try{challenge=await issueChallenge(config,env,request,row);}catch(error){if(error.status!==429)throw error;challenge={mode:'unavailable',reason:'rate_limited',sent:false,expiresInSeconds:600,retryAfterSeconds:error.retryAfterSeconds||60,message:error.message};}
     return json(201,{registrationId,verified:false,verificationRequired:true,downloadAvailable:available,downloadUrl:null,...(challenge?{challenge}:{}),message:'Cadastro recebido. Confirme o WhatsApp para liberar o download e o ZapChat.'});
   }
   if(route==='/v1/auth/request-code'&&method==='POST'){
