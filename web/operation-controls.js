@@ -1,6 +1,6 @@
 /* Shared operational settings for the native Android client and Electron. */
 (() => {
-  const prefDefaults = { pttMode:'toggle', hardwareKey:'F9', bluetoothPtt:false, allowLocked:false,
+  const prefDefaults = { rxProtectionMs:500, pttMode:'toggle', hardwareKey:'F9', bluetoothPtt:false, allowLocked:false,
     hidePttButton:false, beepStart:false, beepStop:false, beepIncoming:false, keepScreenOn:false,
     hideStatusBar:false, showMeters:true, voxEnabled:false, voxThreshold:-35, voxHangMs:1200,
     columns:{time:true,callsign:true,name:true,location:true,city:true,state:true,country:true,talkgroup:false,flags:true,splitLocation:false} };
@@ -18,6 +18,7 @@
   pttPane.innerHTML=`<div class="settings-card"><h3>Premir para falar</h3><p class="hint tiny">Modo, botões, tons</p>
     <label>Modo do botão de falar<select id="pttMode"><option value="toggle">Tocar — um toque liga, outro desliga</option><option value="hold">Manter — manter premido para transmitir</option></select></label>
     <label>Mapeamento do botão físico<select id="hardwareKey"><option value="F9">F9</option><option value="VolumeUp">Volume + (Android)</option><option value="VolumeDown">Volume − (Android)</option></select></label>
+    <label>Proteção após RX no Android (ms)<input id="rxProtectionMs" type="number" min="0" max="3000" step="100" ${native()?'':'disabled'}></label><p class="hint tiny">No Android, bloqueia o PTT durante RX local e por este intervalo após a fala. Não garante que toda a rede esteja livre.</p>
     ${switchRow('bluetoothPtt','PTT Bluetooth / botão de auscultadores')}
     <p class="hint tiny">Botões de média ou HID padrão. A compatibilidade depende do acessório e do sistema. F9 global no Windows alterna TX.</p>
     ${switchRow('allowLocked','Falar com o ecrã bloqueado (Android)')}
@@ -76,7 +77,7 @@
     if(c.talkgroup)columns.push(['talkgroup','TG',item=>String(item.talkgroupId)]);
     return columns;
   }
-  function populate(head,body,items){head.replaceChildren();body.replaceChildren();const columns=columnDefinitions();const heading=document.createElement('tr');for(const [,title]of columns){const th=document.createElement('th');th.textContent=title;heading.append(th);}head.append(heading);for(const item of items){const tr=document.createElement('tr');for(const [key,,value] of columns){const td=document.createElement('td');td.dataset.column=key;td.textContent=value(item);td.title=td.textContent;if(prefs().columns.flags&&['location','country'].includes(key)){const country=cleanPlace(item.country);const code=countryCodes.get(country.toLowerCase())||(/^[A-Za-z]{2}$/.test(country)?country.toUpperCase():'');if(code){td.textContent=td.textContent.replace(flag(country),'').trim();const image=document.createElement('img');image.className='country-flag';image.src='/flags/'+code.toLowerCase()+'.svg';image.alt='Bandeira: '+country;image.onerror=()=>image.remove();td.prepend(image);}}tr.append(td);}body.append(tr);}}
+  function populate(head,body,items){head.replaceChildren();body.replaceChildren();const columns=columnDefinitions();const heading=document.createElement('tr');for(const [,title]of columns){const th=document.createElement('th');th.textContent=title;heading.append(th);}head.append(heading);for(const item of items){const tr=document.createElement('tr');for(const [key,,value] of columns){const td=document.createElement('td');td.dataset.column=key;if(key==='callsign'){td.dataset.participantName=item.name||'';td.dataset.dmrId=String(item.sourceId||item.id||'');}td.textContent=value(item);td.title=td.textContent;if(prefs().columns.flags&&['location','country'].includes(key)){const country=cleanPlace(item.country);const code=countryCodes.get(country.toLowerCase())||(/^[A-Za-z]{2}$/.test(country)?country.toUpperCase():'');if(code){td.textContent=td.textContent.replace(flag(country),'').trim();const image=document.createElement('img');image.className='country-flag';image.src='/flags/'+code.toLowerCase()+'.svg';image.alt='Bandeira: '+country;image.onerror=()=>image.remove();td.prepend(image);}}tr.append(td);}body.append(tr);}}
   async function resolveParticipants(){
     if(lookupPending)return;const ids=[...new Set(participants.flatMap(item=>[String(item.sourceId||''),String(item.callsign||'').toUpperCase()]).filter(id=>/^[A-Z0-9/]{2,16}$/.test(id)&&!recordCache.has(id)))].slice(0,4);
     if(!ids.length)return;lookupPending=true;for(const id of ids)recordCache.set(id,null);try{const data=await database('lookup',ids);for(const id of ids)recordCache.set(id,null);for(const record of data.records||[]){recordCache.set(String(record.id),record);recordCache.set(String(record.callsign).toUpperCase(),record);}try{localStorage.setItem('zapdmr-directory-cache',JSON.stringify([...new Map([...recordCache.values()].filter(Boolean).map(record=>[record.id,record])).values()].slice(-2000)));}catch{}renderParticipantsView(false);}catch{}finally{lookupPending=false;if(participants.some(item=>[String(item.sourceId||''),String(item.callsign||'').toUpperCase()].some(id=>/^[A-Z0-9/]{2,16}$/.test(id)&&!recordCache.has(id))))setTimeout(resolveParticipants,300);}
@@ -99,6 +100,7 @@
   let pttBusy=false,wantTransmit=false,lastTxState=false,lastRxBeep=0,wasReceiving=false,wakeLock,desktopVox,voxSilence=0,voxTriggered=false,voxNeedsQuiet=false,voxActivation=0,desktopShortcutReady=false;
   function beep(){if(native())return;try{playTotAlert();}catch{}}
   async function requestPtt(desired){
+    if(desired&&gatewayStatus.rxBusy){toast("RX OCUPADO — AGUARDE");return;}
     if(desired&&window.ZapDMRConsole?.isLearning?.()){toast('Termine a aprendizagem do botão SPP antes de transmitir.');return;}
     if(desired&&(localAudioTestActive||gatewayStatus.talkgroupBurstActive||talkgroupBurstStatus.pending)){toast(localAudioTestActive?'Aguarde o teste local de áudio terminar.':'Aguarde a troca de TalkGroup terminar.');return;}
     wantTransmit=Boolean(desired);if(pttBusy){if(!wantTransmit&&native())void mobileAudio.stopPtt();return;}pttBusy=true;
@@ -107,7 +109,7 @@
         const on=wantTransmit;if(on&&!gatewayStatus.connected){wantTransmit=false;throw new Error('Ligue primeiro ao master.');}
         if(on)stopTalkgroupScan();
         if(native()){
-          if(on){mobilePttHolding=true;mobilePttPending=true;const group=transmitTarget();await mobileAudio.startPtt(group?.id,group?.slot||settings.defaultSlot||1);mobilePttActive=true;mobilePttPending=false;gatewayStatus.pttArmed=true;}
+          if(on){mobilePttHolding=true;mobilePttPending=true;const group=transmitTarget();await mobileAudio.startPtt(group?.id,group?.slot||settings.defaultSlot||1);reflectTx();break; /* Native PTT event confirms acceptance. */}
           else{mobilePttHolding=false;mobilePttPending=false;await mobileAudio.stopPtt();mobilePttActive=false;gatewayStatus.pttArmed=false;}
         }else{
           const result=await callApi('/api/ptt',{method:'POST',body:JSON.stringify({active:on,talkgroupId:transmitTarget()?.id,slot:transmitTarget()?.slot||settings.defaultSlot||1})});
@@ -118,7 +120,7 @@
     }catch(error){wantTransmit=false;mobilePttHolding=false;mobilePttPending=false;if(native())void mobileAudio.stopPtt();toast(error.message);}finally{pttBusy=false;}
   }
   function reflectTx(){const tx=active();if(tx!==lastTxState){if(!native()&&(tx?prefs().beepStart:prefs().beepStop))beep();lastTxState=tx;}
-    $('#ptt').classList.toggle('transmitting',tx);$('#ptt').textContent=tx?'■ TX · transmitir / parar':prefs().pttMode==='toggle'?'🎙 TX · tocar para falar':'🎙 TX · manter para falar';$('#ptt').hidden=prefs().hidePttButton&&!tx;}
+    $('#ptt').classList.toggle('transmitting',tx);$('#ptt').disabled=!tx&&(!gatewayStatus.connected||!gatewayStatus.pttReady||Boolean(gatewayStatus.rxBusy)||Boolean(gatewayStatus.talkgroupBurstActive));$('#ptt').textContent=!tx&&gatewayStatus.rxBusy?'RX OCUPADO — AGUARDE':tx?'■ TX · transmitir / parar':prefs().pttMode==='toggle'?'🎙 TX · tocar para falar':'🎙 TX · manter para falar';$('#ptt').hidden=prefs().hidePttButton&&!tx;}
   const txButton=$('#ptt');txButton.style.touchAction='none';
   txButton.addEventListener('pointerdown',event=>{if(event.button!==0)return;event.preventDefault();if(prefs().pttMode==='hold'){txButton.setPointerCapture?.(event.pointerId);void requestPtt(true);}});
   for(const eventName of ['pointerup','pointercancel','lostpointercapture'])txButton.addEventListener(eventName,()=>{if(prefs().pttMode==='hold')void requestPtt(false);});
@@ -212,6 +214,7 @@
   function saveOptions(){optionsSave=optionsSave.catch(()=>{}).then(()=>persist()).then(()=>apply());return optionsSave;}
   for(const key of optionKeys){const input=$('#'+key);if(!input)continue;input.onchange=async()=>{
     const old=prefs();let value=input.type==='checkbox'?input.checked:input.type==='number'?Number(input.value):input.value;
+    if(key==='rxProtectionMs')value=Math.max(0,Math.min(3000,Number.isFinite(value)?value:500));
     if(key==='voxThreshold')value=Math.max(-60,Math.min(-10,value));if(key==='voxHangMs')value=Math.max(300,Math.min(5000,value));
     try{
       if(native()&&value&&['bluetoothPtt','allowLocked','voxEnabled'].includes(key))await mobileAudio.requestOperationPermission(key==='bluetoothPtt'?'bluetooth':'microphone');
@@ -222,7 +225,7 @@
   for(const key of Object.keys(prefDefaults.columns))$('#column-'+key).onchange=async()=>{const value=prefs();value.columns[key]=$('#column-'+key).checked;if(!['time','callsign','name','location','talkgroup'].some(id=>value.columns[id])){value.columns.callsign=true;$('#column-callsign').checked=true;}settings.operation=value;try{await saveOptions();}catch(error){toast(error.message);}};
   $('#operationTheme').onchange=async event=>{setTheme(event.target.value);$('#theme').value=event.target.value;await persist();};
   $('#batterySettings').onclick=()=>void mobileAudio.batterySettings().catch(error=>toast(error.message));
-  window.ZapDMROperation={apply,renderParticipants:renderParticipantsView,requestPtt};
+  window.ZapDMROperation={apply,renderParticipants:renderParticipantsView,requestPtt,reflectTx};
   setInterval(()=>{
     reflectTx();const reception=window.ZapDMRReception?.render();$('#pttScan').setAttribute('aria-pressed',String(scanEnabled));$('#pttScanLabel').textContent=(gatewayStatus.talkgroupBurstActive||talkgroupBurstStatus.pending)?`A trocar para TG ${groupSelected()?.id||'—'}…`:privateContact?`Individual: ${privateContact.callsign||privateContact.id} · PTT para responder`:scanEnabled?$('#scanStatus').textContent:gatewayStatus.connected?(reception?.text||`TG ${groupSelected()?.id||'—'} — aguardando estado RX`):'A procurar… · ligue ao master para escutar';
     if(!native()&&prefs().beepIncoming&&audioLevels.RX>0&&!wasReceiving&&Date.now()-lastRxBeep>3000){lastRxBeep=Date.now();beep();}wasReceiving=audioLevels.RX>0;

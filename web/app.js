@@ -760,6 +760,7 @@ function displayMobileStatus(data = {}) {
   window.ZapDMRConsole?.updateStatus(data);
   const connected = Boolean(data.connected);
   const reconnecting = data.state === 'reconnecting';
+  if(!connected){mobilePttActive=false;mobilePttPending=false;mobilePttHolding=false;}
   gatewayStatus = { ...gatewayStatus, ...data, connected, pttArmed: mobilePttActive, transmitting: mobilePttActive,
     pttReady: Boolean(data.pttReady), state: data.state || (connected ? 'connected' : 'disconnected'), message: data.message || '' };
   automationStatus = { reconnecting, message: data.message || '' };
@@ -777,7 +778,7 @@ function displayMobileStatus(data = {}) {
   $('#connect').textContent = connected || reconnecting || ['resolving','waiting-login','waiting-auth','waiting-config'].includes(data.state) ? 'Desligar' : 'Ligar ao master';
   $('#connect').disabled = disconnectInProgress;
   $('#ptt').disabled = !connected || !data.pttReady || disconnectInProgress;
-  if (!mobilePttActive) $('#ptt').textContent = '🎙 Segure para falar';
+  window.ZapDMROperation?.reflectTx();
   $('#audioState').textContent = data.voiceCodecAvailable ? 'Vocoder Android ARM: pronto.' : 'Vocoder Android ARM: indisponível neste build.';
 }
 
@@ -812,11 +813,12 @@ function handleMobileRadioEvent(packet) {
     $('#lastHeardState').textContent = data.message || 'Monitor global a ligar…';
     $('#catalogActivitySource').textContent = connected ? 'Atividade global BrandMeister · janela de 60 s' : 'Monitor global a reconectar · os estados podem estar desatualizados.';
   }
+  if (packet?.event === 'rxBusy') { gatewayStatus.rxBusy=Boolean(data.busy);window.ZapDMROperation?.reflectTx(); return; }
   if (packet?.event === 'ptt') {
     mobilePttActive = Boolean(data.active);
     mobilePttPending = false;
     gatewayStatus.pttArmed = mobilePttActive;
-    $('#ptt').textContent = mobilePttActive ? '■ Transmitindo…' : '🎙 Segure para falar';
+    window.ZapDMROperation?.reflectTx();
   }
   if (packet?.event === 'audioLevel') {
     const direction = data.direction === 'TX' || data.direction === 'RX' ? data.direction : null;
@@ -930,15 +932,25 @@ async function init() {
   if (androidAudioAvailable) {
     await window.ZapDMRCommunity?.initialize();
     displayMobileStatus();
-    if (settings.autoConnectOnStartup && window.ZapDMRCommunity?.isComplete() && mobileSecureConfig.hotspotPassword && settings.callsign && settings.dmrId && settings.essid && settings.masterHost) {
-      mobileAudio.connectRadio(settings, mobileSecureConfig.hotspotPassword)
-        .catch((error) => toast(error.message || 'Não foi possível ligar automaticamente ao master.'));
-    }
+    await reconnectMobileAfterOpen();
   }
   connectWebSocket();
   setInterval(refreshCatalogActivity, 1000);
   setInterval(() => updateTotStatus(totStatus), 1000);
   window.ZapDMRReady=true;window.dispatchEvent(new Event('zapdmr:ready'));
+}
+
+async function reconnectMobileAfterOpen(){
+  const resume=Boolean((await mobileAudio.takeQuickExitResume()).resume);
+  if(!resume&&!settings.autoConnectOnStartup)return;
+  const missing=[];
+  if(!settings.callsign)missing.push('indicativo');if(!settings.dmrId)missing.push('Radio ID');
+  if(!settings.essid)missing.push('ESSID');if(!settings.masterHost)missing.push('master');
+  if(!mobileSecureConfig.hotspotPassword)missing.push('Hotspot Security Password');
+  if(!window.ZapDMRCommunity?.isComplete())missing.push('WhatsApp do perfil');
+  if(missing.length){setActiveScreen('settings');setActiveSettingsPane('profile');toast('Para reconectar, complete: '+missing.join(', ')+'.');return;}
+  try{await mobileAudio.connectRadio(settings,mobileSecureConfig.hotspotPassword,resume);}
+  catch(error){toast(error.message||'Não foi possível ligar automaticamente ao master. Confira rede, perfil e permissões do Android.');}
 }
 
 async function importMobileFirmware(target, useNetwork = false) {

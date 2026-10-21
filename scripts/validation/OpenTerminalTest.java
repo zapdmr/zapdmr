@@ -9,9 +9,10 @@ public class OpenTerminalTest {
     static byte[] body(byte[] packet){return Arrays.copyOfRange(packet,18,packet.length);}
     static byte[] subscription(int id){return ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putInt(7).putInt(id).array();}
     public static void main(String[] args) throws Exception {
-        List<byte[]> sent=new ArrayList<>();List<Integer> voices=new ArrayList<>();List<String> states=new ArrayList<>();
+        List<byte[]> sent=new ArrayList<>();List<Integer> voices=new ArrayList<>();List<String> states=new ArrayList<>();List<Boolean> callEnds=new ArrayList<>();
         OpenTerminal client=new OpenTerminal(1234567,"fixture",sent::add,new OpenTerminal.Listener(){
             public void authenticated(){states.add("authenticated");}
+            public void call(int source,int destination,boolean individual,long stream,boolean end){callEnds.add(end);}
             public void reception(String state,int target,String message){states.add(state);}
             public void voice(int source,int destination,boolean privateCall,byte[][] words){check(words.length==3&&words[0].length==9,"AMBE FEC words");voices.add(destination);}
         });
@@ -34,7 +35,9 @@ public class OpenTerminalTest {
         client.transmit(0x911,OpenTerminal.header(72426,1234567,false));client.transmit(0x920,new byte[27]);client.transmit(0x912,OpenTerminal.header(72426,1234567,false));
         client.select(915,false);client.receive(OpenTerminal.packet(0x902,14,empty,0));client.receive(OpenTerminal.packet(0x901,15,empty,0));check(client.state().equals("awaiting-traffic"),"Empty ACK does not falsely confirm TG");
         client.select(91,false);java.lang.reflect.Field deadline=OpenTerminal.class.getDeclaredField("deadline");deadline.setAccessible(true);deadline.setLong(client,System.currentTimeMillis()-1);client.tick();check(client.state().equals("error"),"Missing ACK fails visibly");
-        client.close();check(type(sent.get(sent.size()-1))==1,"ODTP close, not HBP/TG4000");
+        client.receive(OpenTerminal.packet(0x911,16,OpenTerminal.header(91,2345678,false),1));
+        client.receive(OpenTerminal.packet(0x912,17,empty,1));check(callEnds.contains(false)&&callEnds.get(callEnds.size()-1),"RX header and terminator notify local guard");
+        client.close();check(type(sent.get(sent.size()-2))==0x902,"Unsubscribe before close");check(type(sent.get(sent.size()-1))==1,"ODTP close, not HBP/TG4000");
         System.out.println("PASS Android ODTP core: handshake, exact ACK, empty ACK, RX before PTT, rapid selection, old TG rejected, explicit TX only, timeout and close (pure JVM, no device audio).");
     }
 }

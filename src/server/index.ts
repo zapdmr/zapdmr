@@ -1299,6 +1299,7 @@ export async function startServer(options: StartOptions = {}) {
     return res.status(resultStatus(result)).json(result);
   });
   app.post('/api/disconnect', async (_req, res) => {
+    if(gateway.status().pttArmed)return res.status(409).json({message:'Termine a transmissão antes de desconectar.'});
     connectionWanted = false;
     clearTotTimers();
     clearReconnect(true);

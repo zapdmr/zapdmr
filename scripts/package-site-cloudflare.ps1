@@ -19,7 +19,7 @@ $files = @(
     'cloudflare/api.mjs','cloudflare/attachments.mjs','cloudflare/release-notifications.mjs','cloudflare/worker.mjs','cloudflare/schema.sql',
     'cloudflare/package.json','cloudflare/package-lock.json','cloudflare/wrangler.jsonc',
     'cloudflare/README.md','cloudflare/.gitignore','cloudflare/configure-secrets.mjs','cloudflare/configure-whatsapp-bridge.mjs',
-    'cloudflare/migrations/0001_whatsapp_otp.sql','cloudflare/migrations/0002_zapchat_attachments.sql','cloudflare/migrations/0003_release_notifications.sql','ZAPCHAT-ANEXOS.md','AVISOS-VERSOES.md','VERIFICACAO-1.4.0.md','VERIFICACAO-1.4.1.md','VERIFICACAO-1.4.2.md','VERIFICACAO-1.4.3.md',
+    'cloudflare/migrations/0001_whatsapp_otp.sql','cloudflare/migrations/0002_zapchat_attachments.sql','cloudflare/migrations/0003_release_notifications.sql','ZAPCHAT-ANEXOS.md','AVISOS-VERSOES.md','VERIFICACAO-1.4.0.md','VERIFICACAO-1.4.1.md','VERIFICACAO-1.4.2.md','VERIFICACAO-1.4.3.md','VERIFICACAO-1.4.5.md',
     'whatsapp-bridge/bridge.mjs','whatsapp-bridge/dpapi.ps1','whatsapp-bridge/start-bridge.ps1','whatsapp-bridge/supervise-bridge.ps1','whatsapp-bridge/install-startup.ps1',
     'whatsapp-bridge/package.json','whatsapp-bridge/package-lock.json','whatsapp-bridge/README.md','whatsapp-bridge/.gitignore'
 )

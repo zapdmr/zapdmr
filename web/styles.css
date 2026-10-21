@@ -428,3 +428,12 @@ body>.toast.show{transform:translate(-50%,0)}
   .catalog .group-row .select{min-height:32px;padding:4px 5px;font-size:8px;line-height:1.15;white-space:nowrap}
   .catalog .group-row .row-star,.catalog .group-row .remove-talkgroup{width:24px;min-height:36px;padding:0;justify-self:center}
 }
+
+/* Participant actions and safe radio disconnect, shared light/dark themes. */
+.radio-power{display:grid;place-items:center;flex-shrink:0;color:var(--green-text)}
+.radio-power svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2.3;stroke-linecap:round}
+.radio-actions-dialog{width:min(380px,calc(100vw - 32px));max-height:85dvh;overflow:auto;padding:22px;border:1px solid var(--border);border-radius:20px;background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
+.radio-actions-dialog::backdrop{background:#0009}.radio-actions-dialog h2{font-size:19px;margin:0 0 16px;overflow-wrap:anywhere}
+.radio-actions-dialog p{font-size:13px;line-height:1.5;color:var(--muted)}.radio-actions-dialog .button{display:block;width:100%;margin-top:10px;min-height:44px;white-space:normal}
+.participant-action{padding:4px 0;border:0;background:transparent;color:var(--green-text);font:inherit;font-weight:700;text-decoration:underline;text-underline-offset:3px;min-height:32px}
+@media(max-width:480px){.top-actions{gap:5px}.top-actions .radio-power{width:34px;height:34px}.topbar .brand{min-width:0}.topbar .theme select{max-width:80px}}

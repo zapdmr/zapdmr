@@ -11,6 +11,7 @@ final class OpenTerminal {
     interface Transport { void send(byte[] data) throws Exception; }
     interface Listener {
         void authenticated();
+        default void call(int source,int destination,boolean individual,long stream,boolean end) {}
         void reception(String state,int target,String message);
         void voice(int source,int destination,boolean individual,byte[][] words) throws Exception;
     }
@@ -36,7 +37,7 @@ final class OpenTerminal {
     synchronized String message(){return message;}
     synchronized int target(){return target;}
     synchronized void start(int target) throws Exception{this.target=target;seen=System.currentTimeMillis();status("connecting","Conectando ao servidor ODTP…");keepalive();}
-    private void keepalive() throws Exception{byte[] description="ZapDMR 1.4.3".getBytes(StandardCharsets.US_ASCII);ByteBuffer data=ByteBuffer.allocate(5+description.length).order(ByteOrder.LITTLE_ENDIAN);data.putInt(id).put((byte)0x21).put(description);send(0,data.array());pingAt=System.currentTimeMillis();}
+    private void keepalive() throws Exception{byte[] description="ZapDMR 1.4.5".getBytes(StandardCharsets.US_ASCII);ByteBuffer data=ByteBuffer.allocate(5+description.length).order(ByteOrder.LITTLE_ENDIAN);data.putInt(id).put((byte)0x21).put(description);send(0,data.array());pingAt=System.currentTimeMillis();}
     synchronized void select(int target,boolean individual) throws Exception{
         int peer=individual?target:0;if(this.target==target&&privatePeer==peer&&!"error".equals(receptionState)&&!"disconnected".equals(receptionState))return;
         this.target=target;privatePeer=peer;revision++;source=destination=0;
@@ -69,9 +70,9 @@ final class OpenTerminal {
             if(type==0x902)subscribe();else status(identified?"ready":"awaiting-traffic",identified?"TG "+target+" — inscrição confirmada pelo servidor.":"TG "+target+" — inscrição respondida; aguardando áudio para confirmar o destino.");return;
         }
         if(!authenticated)return;
-        if(type==0x911){if(data.length>=9){callSerial++;individual=(data[0]&63)==3;destination=read24(data,3);source=read24(data,6);}return;}
-        if(type==0x912){source=destination=0;return;}
-        if(type==0x928){if(data.length<12)return;ByteBuffer header=ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN);int session=header.getInt();int src=header.getInt(),dst=header.getInt();if((session!=5&&session!=7)||src<1||src>0xffffff||dst<1||dst>0xffffff)return;callSerial++;individual=session==5;source=src;destination=dst;return;}
+        if(type==0x911){if(data.length>=9){callSerial++;individual=(data[0]&63)==3;destination=read24(data,3);source=read24(data,6);listener.call(source,destination,individual,callSerial,false);}return;}
+        if(type==0x912){listener.call(source,destination,individual,callSerial,true);source=destination=0;return;}
+        if(type==0x928){if(data.length<12)return;ByteBuffer header=ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN);int session=header.getInt();int src=header.getInt(),dst=header.getInt();if((session!=5&&session!=7)||src<1||src>0xffffff||dst<1||dst>0xffffff)return;callSerial++;individual=session==5;source=src;destination=dst;listener.call(source,destination,individual,callSerial,false);return;}
         if(type==0x920&&data.length==27&&source>0&&pendingType<0){
             boolean matches=privatePeer>0?individual&&source==privatePeer&&destination==id:!individual&&destination==target;
             if(!matches)return;status("receiving","TG "+target+" — áudio recebido pela conexão ODTP.");
@@ -79,5 +80,5 @@ final class OpenTerminal {
         }
     }
     synchronized void transmit(int type,byte[] payload) throws Exception{if(!authenticated||stopped)throw new java.io.IOException("ODTP não autenticado.");transport.send(packet(type,realtime++,payload,1));}
-    synchronized void close(){try{if(!stopped)send(1,new byte[0]);}catch(Exception ignored){}finally{stopped=true;authenticated=false;password="";source=destination=0;pendingType=-1;}}
+    synchronized void close(){try{if(!stopped){if(authenticated)send(0x902,new byte[0]);send(1,new byte[0]);}}catch(Exception ignored){}finally{stopped=true;authenticated=false;password="";source=destination=0;pendingType=-1;}}
 }

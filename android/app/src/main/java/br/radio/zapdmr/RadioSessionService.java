@@ -47,6 +47,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /** Owns the mobile HBP UDP session and keeps it alive in a visible Android foreground service. */
 public final class RadioSessionService extends Service {
     static final String ACTION_CONNECT = "br.radio.zapdmr.radio.CONNECT";
+    static final String ACTION_QUICK_EXIT = "br.radio.zapdmr.radio.QUICK_EXIT";
+    private String quickExitRequest;
+    private volatile boolean destroyed;
+    private final java.util.Set<android.media.ToneGenerator> activeTones=java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private volatile boolean startupReceiveOnly;
     static final String ACTION_DISCONNECT = "br.radio.zapdmr.radio.DISCONNECT";
     static final String ACTION_UNLINK = "br.radio.zapdmr.radio.UNLINK";
     static final String ACTION_TUNE = "br.radio.zapdmr.radio.TUNE";
@@ -62,6 +67,22 @@ public final class RadioSessionService extends Service {
     static final String ACTION_AUDIO_LEVELS = "br.radio.zapdmr.radio.AUDIO_LEVELS";
     static final String ACTION_AUDIO_TEST = "br.radio.zapdmr.radio.AUDIO_TEST";
     static volatile boolean running;
+    private final ReceiveGuard receiveGuard=new ReceiveGuard();
+    private volatile boolean txHeaderSent,txStopping;
+    private boolean guardAnnounced;
+    private final Runnable guardRefresh=()->refreshReceiveGuard();
+    private void refreshReceiveGuard(){boolean busy; synchronized(receiveGuard){busy=receiveGuard.busy(android.os.SystemClock.elapsedRealtime());} if(busy!=guardAnnounced){guardAnnounced=busy;emit("rxBusy",json("busy",busy));Log.i(TAG,busy?"Local RX interlock engaged":"Local RX interlock released");}controlsHandler.removeCallbacks(guardRefresh);if(busy)controlsHandler.postDelayed(guardRefresh,100);}
+    private void localReception(int source,int destination,boolean individual,int slot,long stream,boolean end){
+        synchronized(receiveGuard){
+            boolean selected=privateTargetId>0?individual&&destination==settings.optInt("dmrId")&&source==privateTargetId:!individual&&destination==selectedTalkgroup&&slot==selectedSlot;
+            if(!connected||!selected||source==settings.optInt("dmrId"))return;
+            receiveGuard.configure(controls().optInt("rxProtectionMs",500));
+            if(end)receiveGuard.end(stream,android.os.SystemClock.elapsedRealtime());else receiveGuard.voice(stream,android.os.SystemClock.elapsedRealtime());
+        }
+        controlsHandler.post(guardRefresh);
+    }
+    private void resetReceiveGuard(){receiveGuard.reset();controlsHandler.post(guardRefresh);}
+
     static final String ACTION_EVENT = "br.radio.zapdmr.radio.EVENT";
     static final String EXTRA_EVENT = "event";
     static final String EXTRA_DATA = "data";
@@ -86,7 +107,7 @@ public final class RadioSessionService extends Service {
     };
     private void recoverNetwork(){
         if(!sessionDesired)return;
-        networkRetry=true;reconnectAttempt=0;selectionVersion++;connected=false;closeSocket();
+        networkRetry=true;reconnectAttempt=0;selectionVersion++;resetReceiveGuard();connected=false;closeSocket();
         controlsHandler.postDelayed(()->{if(sessionDesired&&(networkThread==null||!networkThread.isAlive()))connectHbp();},1000);
     }
 
@@ -234,7 +255,7 @@ public final class RadioSessionService extends Service {
         if(!controls().optBoolean(start?"beepStart":"beepStop",false))return;
         playTone(start?android.media.ToneGenerator.TONE_PROP_BEEP:android.media.ToneGenerator.TONE_PROP_ACK);
     }
-    private void playTone(int tone){try{android.media.ToneGenerator generator=new android.media.ToneGenerator(android.media.AudioManager.STREAM_MUSIC,50);generator.startTone(tone,100);controlsHandler.postDelayed(generator::release,200);}catch(Exception ignored){}}
+    private void playTone(int tone){if(destroyed||QuickExitState.blocked())return;try{android.media.ToneGenerator generator=new android.media.ToneGenerator(android.media.AudioManager.STREAM_MUSIC,50);activeTones.add(generator);generator.startTone(tone,100);controlsHandler.postDelayed(()->{if(activeTones.remove(generator))generator.release();},200);}catch(Exception ignored){}}
 
     @Override public void onCreate() {
         super.onCreate();
@@ -263,6 +284,22 @@ public final class RadioSessionService extends Service {
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent == null ? "" : intent.getAction();
+        if(ACTION_QUICK_EXIT.equals(action)){
+            String request=intent.getStringExtra("requestId");
+            if(request==null||request.length()!=36)return START_NOT_STICKY;
+            if(ptt.get()||txStopping){broadcastEvent("quickExitResult",json("requestId",request,"ok",false,"message","Encerre a transmissão antes de sair."));return START_NOT_STICKY;}
+            if(testingAudio.get()){broadcastEvent("quickExitResult",json("requestId",request,"ok",false,"message","Encerre o teste de áudio antes de sair."));return START_NOT_STICKY;}
+            if(!QuickExitState.begin(false)){broadcastEvent("quickExitResult",json("requestId",request,"ok",false,"message","A saída já está em andamento."));return START_NOT_STICKY;}
+            if(!getSharedPreferences(QuickExitState.PREFS,MODE_PRIVATE).edit().putBoolean(QuickExitState.RESUME,true).commit()){
+                QuickExitState.cancel();broadcastEvent("quickExitResult",json("requestId",request,"ok",false,"message","Não foi possível guardar a retomada. Tente sair novamente."));return START_NOT_STICKY;
+            }
+            quickExitRequest=request;sessionDesired=false;autoReconnect=false;selectionVersion++;
+            controlsHandler.removeCallbacksAndMessages(null);linkWorker.shutdownNow();
+            stopNetwork(true);BluetoothSppController.get(this).close();
+            state="disconnected";stateMessage="ZapDMR desconectado.";emit("status",statusData());
+            stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();return START_NOT_STICKY;
+        }
+        if(QuickExitState.blocked()){stopSelf();return START_NOT_STICKY;}
         if (ACTION_CONNECT.equals(action)) {
             startForegroundCompat(NOTIFICATION_ID, notification("A iniciar sessão HBP…"), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
             try {
@@ -275,6 +312,7 @@ public final class RadioSessionService extends Service {
                     startForegroundCompat(NOTIFICATION_ID,notification("A iniciar escuta passiva…"),ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE|ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
                 password = intent.getStringExtra("password") == null ? "" : intent.getStringExtra("password");
                 autoReconnect = intent.getBooleanExtra("autoReconnect", false);
+                startupReceiveOnly=intent.getBooleanExtra("startupReceiveOnly",false);
                 sessionDesired = true;reconnectAttempt=0;
                 selectedTalkgroup = settings.optInt("selectedTalkgroupId", selectedTalkgroup);
                 selectedSlot = settings.optInt("defaultSlot", selectedSlot) == 2 ? 2 : 1;
@@ -284,19 +322,21 @@ public final class RadioSessionService extends Service {
                 fail("INVALID_PROFILE", "Perfil de ligação inválido: " + error.getMessage());
             }
         } else if (ACTION_DISCONNECT.equals(action)) {
+            if(ptt.get()||txStopping){emit("error",json("message","Termine a transmissão antes de desconectar."));return START_NOT_STICKY;}
             sessionDesired = false;
             stopNetwork(true);
+            state="disconnected";stateMessage="ZapDMR desconectado.";emit("status",statusData());
             stopSelf();
         } else if (ACTION_UNLINK.equals(action)) {
-            privateTargetId=0;selectionVersion++;releasePlayer();
+            privateTargetId=0;selectionVersion++;resetReceiveGuard();releasePlayer();
             if(terminal!=null){try{terminal.select(0,false);}catch(Exception error){emit("error",json("message",safeMessage(error)));}}
             else requestLink(4000,selectedSlot);
         } else if (ACTION_TARGET.equals(action)) {
             if(ptt.get()||testingAudio.get()||pendingLinks.get()>0){emit("error",json("message","Termine a transmissão ou troca atual antes de escolher um contacto."));return START_NOT_STICKY;}
             int destination=intent.getIntExtra("destinationId",0);String type=intent.getStringExtra("callType");
-            if("group".equals(type)){privateTargetId=0;selectionVersion++;releasePlayer();stateMessage="TG "+selectedTalkgroup+" selecionada.";if(terminal!=null)try{terminal.select(selectedTalkgroup,false);}catch(Exception error){emit("error",json("message",safeMessage(error)));}emit("selection",statusData());emitStatus();return START_NOT_STICKY;}
+            if("group".equals(type)){privateTargetId=0;selectionVersion++;resetReceiveGuard();releasePlayer();stateMessage="TG "+selectedTalkgroup+" selecionada.";if(terminal!=null)try{terminal.select(selectedTalkgroup,false);}catch(Exception error){emit("error",json("message",safeMessage(error)));}emit("selection",statusData());emitStatus();return START_NOT_STICKY;}
             if(!"private".equals(type)||destination<1||destination>0xffffff||destination==settings.optInt("dmrId",0)){emit("error",json("message","O contacto precisa de um Radio ID válido para chamada individual."));return START_NOT_STICKY;}
-            privateTargetId=destination;selectionVersion++;selectedSlot=intent.getIntExtra("slot",selectedSlot)==2?2:1;releasePlayer();emitAudioLevel("RX",new byte[320],destination,0);
+            privateTargetId=destination;selectionVersion++;resetReceiveGuard();selectedSlot=intent.getIntExtra("slot",selectedSlot)==2?2:1;releasePlayer();emitAudioLevel("RX",new byte[320],destination,0);
             if(terminal!=null)try{terminal.select(destination,true);}catch(Exception error){emit("error",json("message",safeMessage(error)));}
             stateMessage="Contacto "+destination+" selecionado. Prima PTT para chamada individual.";emit("selection",statusData());emitStatus();
             if(sessionDesired&&!connected&&(networkThread==null||!networkThread.isAlive())){reconnectAttempt=0;connectHbp();}
@@ -310,9 +350,14 @@ public final class RadioSessionService extends Service {
         } else if (ACTION_TUNE.equals(action)) {
             // Selecting a destination is passive even for a custom TG 4000.
             // Only the explicit ACTION_UNLINK button may transmit that command.
-            privateTargetId=0;selectionVersion++;
-            selectedTalkgroup = intent.getIntExtra("talkgroupId", 0);
-            selectedSlot = intent.getIntExtra("slot", 1) == 2 ? 2 : 1;
+            if(ptt.get()){emit("error",json("message","Termine a transmissão antes de trocar TG."));return START_NOT_STICKY;}
+            synchronized(receiveGuard){
+                privateTargetId=0;selectionVersion++;
+                selectedTalkgroup = intent.getIntExtra("talkgroupId", 0);
+                selectedSlot = intent.getIntExtra("slot", 1) == 2 ? 2 : 1;
+                receiveGuard.reset();
+            }
+            controlsHandler.post(guardRefresh);
             releasePlayer();emitAudioLevel("RX",new byte[320],selectedTalkgroup,0);
             if(terminal!=null)try{terminal.select(selectedTalkgroup,false);}catch(Exception error){emit("error",json("message",safeMessage(error)));}
             stateMessage=useOpenTerminal()?"TG "+selectedTalkgroup+" — solicitando inscrição ODTP…":"Homebrew/HBP não oferece inscrição de TG sem PTT. Use ODTP num master compatível.";
@@ -371,6 +416,7 @@ public final class RadioSessionService extends Service {
     }
     private void stopVoxMonitor(){voxMonitor=false;AudioRecord audio=voxRecorder;if(audio!=null)try{audio.stop();}catch(Exception ignored){}}
     private void startVoxMonitor(){
+        if(startupReceiveOnly||QuickExitState.blocked())return;
         if(testingAudio.get()||pendingLinks.get()>0||voxMonitor||ptt.get()||!connected||!controls().optBoolean("voxEnabled")||!remoteAllowed()||ContextCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)return;
         voxMonitor=true;
         new Thread(() -> {
@@ -414,6 +460,7 @@ public final class RadioSessionService extends Service {
     }
 
     private synchronized void connectHbp() {
+        if(QuickExitState.blocked()||!sessionDesired)return;
         if(networkThread!=null&&networkThread.isAlive())return;
         if (!validProfile()) { fail("INVALID_PROFILE", "Complete indicativo, Radio ID, ESSID, master e palavra-passe nas Definições."); return; }
         state = "resolving"; stateMessage = "A resolver o master "+(useOpenTerminal()?"ODTP":"HBP")+"…"; emitStatus();
@@ -467,12 +514,13 @@ public final class RadioSessionService extends Service {
         Network network=connectivity==null?null:connectivity.getActiveNetwork();
         InetAddress ipv4=null;
         for(InetAddress candidate:network==null?InetAddress.getAllByName(host):network.getAllByName(host))if(candidate instanceof Inet4Address){ipv4=candidate;break;}
+        if(!sessionDesired||QuickExitState.blocked())throw new java.io.IOException("Sessão encerrada antes da resolução do master.");
         if(ipv4==null)throw new java.net.SocketException("O master não tem endereço IPv4 acessível nesta rede.");
         DatagramSocket udp=new DatagramSocket(null);
         try{
             udp.bind(new InetSocketAddress(InetAddress.getByName("0.0.0.0"),0));
             if(network!=null)network.bindSocket(udp);
-            udp.connect(ipv4,port);udp.setSoTimeout(750);socket=udp;
+            synchronized(socketLock){if(!sessionDesired||QuickExitState.blocked())throw new java.io.IOException("Sessão encerrada.");udp.connect(ipv4,port);udp.setSoTimeout(750);socket=udp;}
             Log.i(TAG,"HBP IPv4: "+ipv4.getHostAddress()+":"+port);
         }catch(Exception error){udp.close();throw error;}
         if(useOpenTerminal()){receiveTerminal(udp);return;}
@@ -531,7 +579,9 @@ public final class RadioSessionService extends Service {
             private long previousCall=-1;
             public void authenticated(){connected=true;reconnectAttempt=0;state="connected";acquireWakeLock();controlsHandler.post(RadioSessionService.this::startVoxMonitor);emitStatus();}
             public void reception(String reception,int target,String message){stateMessage=message;emitStatus();}
+            public void call(int source,int destination,boolean individual,long stream,boolean end){localReception(source,destination,individual,selectedSlot,stream,end);}
             public void voice(int source,int destination,boolean individual,byte[][] words) throws Exception {
+                OpenTerminal rx=terminal;localReception(source,destination,individual,selectedSlot,rx==null?0:rx.stream(),false);
                 boolean selected=privateTargetId>0?individual&&destination==settings.optInt("dmrId")&&source==privateTargetId:!individual&&destination==selectedTalkgroup;
                 if(!selected||testingAudio.get()||ptt.get())return;
                 emit("activity",json("talkgroupId",individual?source:destination,"lastActivityAt",System.currentTimeMillis(),"sourceId",source,"callType",individual?"private":"group","slot",selectedSlot,"global",false));
@@ -553,7 +603,9 @@ public final class RadioSessionService extends Service {
         int tg = read24(packet, 8);
         int flags = packet[15] & 255;
         boolean individual=(flags&0x40)!=0;int source=read24(packet,5);int ownId=Integer.parseInt(settings.getString("dmrId"));
-        boolean selected=privateTargetId>0?individual&&tg==ownId&&source==privateTargetId:!individual&&tg==selectedTalkgroup;
+        boolean selected=privateTargetId>0?individual&&tg==ownId&&source==privateTargetId:!individual&&tg==selectedTalkgroup&&((flags&0x80)==0?1:2)==selectedSlot;
+        int kind=flags&0x3f;
+        if(kind==0x21||kind==0x22||(flags&0x20)==0) localReception(source,tg,individual,(flags&0x80)==0?1:2,ByteBuffer.wrap(packet,16,4).getInt()&0xffffffffL,kind==0x22);
         if(selected&&(flags&0x3f)==0x21&&controls().optBoolean("beepIncoming")&&System.currentTimeMillis()-lastRxTone>1500){lastRxTone=System.currentTimeMillis();playTone(android.media.ToneGenerator.TONE_PROP_BEEP);}
         if((flags&0x20)!=0)Log.i(TAG,"RX DMRD TG "+tg+" origem "+read24(packet,5));
         JSONObject activity = json("talkgroupId", tg, "lastActivityAt", System.currentTimeMillis(), "sourceId", source, "callType",individual?"private":"group", "slot", (flags & 0x80) == 0 ? 1 : 2);
@@ -574,7 +626,9 @@ public final class RadioSessionService extends Service {
         }
     }
 
-    private void startPtt(int tg, int slot) {
+    private void startPtt(int tg,int slot){try{beginPtt(tg,slot);}finally{emit("ptt",json("active",ptt.get(),"direction","TX"));}}
+    private void beginPtt(int tg, int slot) {
+        if(QuickExitState.blocked())return;
         OpenTerminal receiver=terminal;
         if(receiver!=null&&java.util.Arrays.asList("connecting","subscribing","authenticating","error","unsubscribed").contains(receiver.state())){emit("error",json("message","Aguarde a resposta da inscrição ODTP antes de transmitir."));return;}
         if(privateTargetId>0)tg=privateTargetId;
@@ -589,12 +643,13 @@ public final class RadioSessionService extends Service {
         stopVoxMonitor();
         for(int wait=0;voxRecorder!=null&&wait<30;wait++)try{Thread.sleep(10);}catch(InterruptedException error){Thread.currentThread().interrupt();return;}
         if(voxRecorder!=null){emit("error",json("message","Aguarde o microfone VOX ficar disponível."));return;}
-        if (!ptt.compareAndSet(false,true)) return;
+        synchronized(receiveGuard){if(txStopping){emit("error",json("message","Aguarde o encerramento do PTT anterior."));return;}if(receiveGuard.busy(android.os.SystemClock.elapsedRealtime())){emit("error",json("message","RX OCUPADO — AGUARDE"));emit("ptt",json("active",false));return;}if (!ptt.compareAndSet(false,true)) return;txHeaderSent=false;startupReceiveOnly=false;}
         try {
             int rx=Integer.parseInt(settings.optString("rxFrequencyHz","0")); int tx=Integer.parseInt(settings.optString("txFrequencyHz","0"));
             txPrivateCall=privateTargetId>0;txTalkgroup=tg; txSlot=(rx>0&&rx==tx)?1:(slot==2?2:1); voiceSequence=0; packetSequence=0;
             streamId=new SecureRandom().nextInt() & 0xffffffffL; if(streamId==0)streamId=1;
             sendDmr(DmrFrameEngine.fullLc(tg,Integer.parseInt(settings.getString("dmrId")),false,txPrivateCall),0x21);
+            txHeaderSent=true;
             startForegroundCompat(NOTIFICATION_ID, notification("Transmitindo na TG " + tg), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE | ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
             tone(true);
             AudioRecord audio=createRecorder(); recorder=audio; audio.startRecording();
@@ -646,7 +701,9 @@ public final class RadioSessionService extends Service {
     }
 
     private void stopPtt() {
-        if(!ptt.getAndSet(false))return;
+        final boolean closeTransmission;
+        synchronized(receiveGuard){if(!ptt.getAndSet(false))return;txStopping=true;closeTransmission=txHeaderSent;txHeaderSent=false;}
+        try {
         if(totCutoff!=null)controlsHandler.removeCallbacks(totCutoff);if(totWarning!=null)controlsHandler.removeCallbacks(totWarning);
         pttStartedAt=0;voxTransmitting=false;tone(false);emit("tot",json("active",false));
         controlsHandler.postDelayed(this::startVoxMonitor,700);
@@ -655,14 +712,16 @@ public final class RadioSessionService extends Service {
         if(active!=null)try{active.release();}catch(Exception ignored){}
         captureThread=null; recorder=null;
         synchronized(txCodewords){txCodewords.clear();}
-        try { if(connected&&txTalkgroup>0)sendDmr(DmrFrameEngine.fullLc(txTalkgroup,Integer.parseInt(settings.getString("dmrId")),true,txPrivateCall),0x22); } catch(Exception error){Log.w(TAG,"Falha no terminador DMR",error);}
+        try { if(closeTransmission&&connected&&txTalkgroup>0)sendDmr(DmrFrameEngine.fullLc(txTalkgroup,Integer.parseInt(settings.getString("dmrId")),true,txPrivateCall),0x22); } catch(Exception error){Log.w(TAG,"Falha no terminador DMR",error);}
         emit("ptt",json("active",false,"direction","TX"));
         startForegroundCompat(NOTIFICATION_ID,notification(connected?"Ligado · PTT em espera":"Ligação ZapDMR"),(controls().optBoolean("allowLocked")||controls().optBoolean("voxEnabled"))?ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE|ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE:ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
+        } finally {txStopping=false;}
     }
 
     private void stopRecorder() { AudioRecord audio=recorder; recorder=null; if(audio!=null){try{audio.stop();}catch(Exception ignored){} try{audio.release();}catch(Exception ignored){}} }
 
     private boolean playPcm(byte[] pcm) {
+        if(destroyed||QuickExitState.blocked())return false;
         synchronized(playbackLock){try {
             if(!acquireAudioFocus())return false; // Drop stale PCM; HBP and vocoder keep receiving while focus is unavailable.
             int volume=Math.max(0,Math.min(200,settings.optInt("rxVolumePercent",100)));
@@ -726,8 +785,15 @@ public final class RadioSessionService extends Service {
     }
 
     private void sendHbp(byte[] bytes) throws Exception {
+        if(QuickExitState.blocked()){
+            boolean closeHbp=bytes.length>=5&&new String(bytes,0,5,StandardCharsets.US_ASCII).equals("RPTCL");
+            int type=bytes.length>=18&&bytes[0]=='R'&&bytes[1]=='E'?((bytes[8]&255)|((bytes[9]&255)<<8)):-1;
+            if(!closeHbp&&type!=0x902&&type!=1)throw new java.io.IOException("ZapDMR encerrando a sessão.");
+        }
         DatagramSocket active=socket;if(active==null)throw new java.io.IOException("Socket UDP encerrado.");
-        synchronized(socketLock){if(socket!=active)throw new java.io.IOException("Sessão UDP encerrada.");try{active.send(new DatagramPacket(bytes,bytes.length));usageTxBytes.addAndGet(bytes.length);saveUsage(false);}catch(java.net.SocketException error){networkRetry=true;selectionVersion++;connected=false;closeSocket();throw error;}}
+        synchronized(socketLock){if(socket!=active)throw new java.io.IOException("Sessão UDP encerrada.");try{synchronized(receiveGuard){
+            if(receiveGuard.blocksPacket(bytes,android.os.SystemClock.elapsedRealtime()))throw new java.io.IOException("RX OCUPADO — AGUARDE");
+            active.send(new DatagramPacket(bytes,bytes.length));usageTxBytes.addAndGet(bytes.length);saveUsage(false);}}catch(java.net.SocketException error){networkRetry=true;selectionVersion++;resetReceiveGuard();connected=false;closeSocket();throw error;}}
     }
 
     private byte[] idPacket(String tag,int id) { ByteArrayOutputStream out=new ByteArrayOutputStream();try{out.write(tag.getBytes(StandardCharsets.US_ASCII));writeInt(out,id);}catch(Exception ignored){}return out.toByteArray(); }
@@ -751,6 +817,7 @@ public final class RadioSessionService extends Service {
     private static int read24(byte[] in,int at){return ((in[at]&255)<<16)|((in[at+1]&255)<<8)|(in[at+2]&255);}
 
     private void startForegroundCompat(int id,Notification notification,int type) {
+        if(destroyed||QuickExitState.blocked())return;
         if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.Q)startForeground(id,notification,type|ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);else startForeground(id,notification);
     }
     private Notification notification(String text) {
@@ -765,14 +832,15 @@ public final class RadioSessionService extends Service {
     private void createNotificationChannel(){if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.O){NotificationManager manager=getSystemService(NotificationManager.class);manager.createNotificationChannel(new NotificationChannel(CHANNEL_ID,"Sessão de rádio ZapDMR",NotificationManager.IMPORTANCE_LOW));}}
     private void acquireWakeLock(){try{PowerManager pm=(PowerManager)getSystemService(Context.POWER_SERVICE);if(wakeLock==null){wakeLock=pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"ZapDMR:RadioSession");wakeLock.setReferenceCounted(false);}if(!wakeLock.isHeld())wakeLock.acquire();}catch(Exception error){Log.w(TAG,"Wake lock não disponível",error);}}
     private void releaseWakeLock(){try{if(wakeLock!=null&&wakeLock.isHeld())wakeLock.release();}catch(Exception ignored){} }
-    private JSONObject statusData(){OpenTerminal client=terminal;return json("protocol",useOpenTerminal()?"odtp":"hbp","reception",json("protocol",useOpenTerminal()?"odtp":"hbp","supported",useOpenTerminal(),"state",client!=null?client.state():useOpenTerminal()?state:connected?"unsupported":state,"targetTalkgroupId",client!=null?client.target():selectedTalkgroup,"message",client!=null?client.message():useOpenTerminal()?stateMessage:connected?"Homebrew/HBP não oferece inscrição sem PTT. Use ODTP num master compatível.":stateMessage),"state",state,"connected",connected,"pttReady",connected&&vocoder!=null&&!linking.get()&&pendingLinks.get()==0,"talkgroupBurstActive",pendingLinks.get()>0,"voiceCodecAvailable",vocoder!=null,"talkgroupId",selectedTalkgroup,"target",json("id",privateTargetId>0?privateTargetId:selectedTalkgroup,"callType",privateTargetId>0?"private":"group"),"usage",usageData(),"reconnectAttempt",reconnectAttempt,"maxReconnectAttempts",maxReconnectAttempts(),"transitionReconnect",transitionReconnect,"message",stateMessage);}
+    private JSONObject statusData(){OpenTerminal client=terminal;return json("protocol",useOpenTerminal()?"odtp":"hbp","reception",json("protocol",useOpenTerminal()?"odtp":"hbp","supported",useOpenTerminal(),"state",client!=null?client.state():useOpenTerminal()?state:connected?"unsupported":state,"targetTalkgroupId",client!=null?client.target():selectedTalkgroup,"message",client!=null?client.message():useOpenTerminal()?stateMessage:connected?"Homebrew/HBP não oferece inscrição sem PTT. Use ODTP num master compatível.":stateMessage),"state",state,"connected",connected,"rxBusy",receiveGuard.busy(android.os.SystemClock.elapsedRealtime()),"pttReady",connected&&vocoder!=null&&!linking.get()&&pendingLinks.get()==0,"talkgroupBurstActive",pendingLinks.get()>0,"voiceCodecAvailable",vocoder!=null,"talkgroupId",selectedTalkgroup,"target",json("id",privateTargetId>0?privateTargetId:selectedTalkgroup,"callType",privateTargetId>0?"private":"group"),"usage",usageData(),"reconnectAttempt",reconnectAttempt,"maxReconnectAttempts",maxReconnectAttempts(),"transitionReconnect",transitionReconnect,"message",stateMessage);}
     private void emitStatus(){emit("status",statusData());int type=ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE;if(ptt.get()||(connected&&(controls().optBoolean("allowLocked")||controls().optBoolean("voxEnabled"))&&ContextCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED))type|=ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;startForegroundCompat(NOTIFICATION_ID,notification(stateMessage),type);}
-    private void emit(String event,JSONObject data){broadcastEvent(event,data);if(radioNotifications!=null){JSONObject entry=radioNotifications.onEvent(event,data,settings);if(entry!=null)broadcastEvent("systemLog",entry);}}
-    private void broadcastEvent(String event,JSONObject data){Intent message=new Intent(ACTION_EVENT).setPackage(getPackageName()).putExtra(EXTRA_EVENT,event).putExtra(EXTRA_DATA,data==null?"{}":data.toString());sendBroadcast(message);}
+    private void emit(String event,JSONObject data){if(destroyed)return;broadcastEvent(event,data);if(radioNotifications!=null){JSONObject entry=radioNotifications.onEvent(event,data,settings);if(entry!=null)broadcastEvent("systemLog",entry);}}
+    private void broadcastEvent(String event,JSONObject data){if(destroyed&&!"quickExitResult".equals(event))return;Intent message=new Intent(ACTION_EVENT).setPackage(getPackageName()).putExtra(EXTRA_EVENT,event).putExtra(EXTRA_DATA,data==null?"{}":data.toString());sendBroadcast(message);}
     private void fail(String code,String message){state="error";stateMessage=message;emit("error",json("code",code,"message",message));emitStatus();}
     private static JSObject json(Object... pairs){JSObject result=new JSObject();for(int i=0;i+1<pairs.length;i+=2)result.put(String.valueOf(pairs[i]),pairs[i+1]);return result;}
 
     private VocoderHelper ensureVocoder() {
+        if(destroyed||QuickExitState.blocked())return null;
         VocoderHelper current = vocoder;
         if (current != null && current.isAlive()) return current;
         java.io.File executable = new java.io.File(getApplicationInfo().nativeLibraryDir, "libqso_dmr_vocoder_helper.so");
@@ -805,7 +873,8 @@ public final class RadioSessionService extends Service {
         connected=false;closeSocket();Thread t=networkThread;networkThread=null;if(t!=null&&t!=Thread.currentThread()){t.interrupt();try{t.join(750);}catch(InterruptedException error){Thread.currentThread().interrupt();}}releaseWakeLock();
         releasePlayer();abandonRxFocus();
         if(vocoder!=null){vocoder.stop();vocoder=null;}
+        resetReceiveGuard();
     }
 
-    @Override public void onDestroy(){BluetoothSppController.get(this).close();saveUsage(true);try{if(connectivity!=null)connectivity.unregisterNetworkCallback(networkCallback);}catch(Exception ignored){}android.media.AudioManager focusManager=(android.media.AudioManager)getSystemService(AUDIO_SERVICE);if(Build.VERSION.SDK_INT>=26&&focusRequest!=null)focusManager.abandonAudioFocusRequest(focusRequest);else focusManager.abandonAudioFocus(focusListener);audioFocusGranted=false;running=false;sessionDesired=false;selectionVersion++;linkWorker.shutdownNow();stopNetwork(false);controlsHandler.removeCallbacksAndMessages(null);if(mediaSession!=null)mediaSession.release();try{android.media.AudioManager audio=(android.media.AudioManager)getSystemService(AUDIO_SERVICE);if(Build.VERSION.SDK_INT>=31)audio.clearCommunicationDevice();else audio.stopBluetoothSco();audio.setMode(android.media.AudioManager.MODE_NORMAL);}catch(Exception ignored){}super.onDestroy();}
+    @Override public void onDestroy(){destroyed=true;boolean cleaned=false;try{for(android.media.ToneGenerator tone:activeTones)try{tone.release();}catch(Exception ignored){}activeTones.clear();BluetoothSppController.get(this).close();saveUsage(true);try{if(connectivity!=null)connectivity.unregisterNetworkCallback(networkCallback);}catch(Exception ignored){}android.media.AudioManager focusManager=(android.media.AudioManager)getSystemService(AUDIO_SERVICE);if(Build.VERSION.SDK_INT>=26&&focusRequest!=null)focusManager.abandonAudioFocusRequest(focusRequest);else focusManager.abandonAudioFocus(focusListener);audioFocusGranted=false;running=false;sessionDesired=false;selectionVersion++;resetReceiveGuard();linkWorker.shutdownNow();stopNetwork(false);controlsHandler.removeCallbacksAndMessages(null);if(mediaSession!=null)mediaSession.release();try{android.media.AudioManager audio=(android.media.AudioManager)getSystemService(AUDIO_SERVICE);if(Build.VERSION.SDK_INT>=31)audio.clearCommunicationDevice();else audio.stopBluetoothSco();audio.setMode(android.media.AudioManager.MODE_NORMAL);}catch(Exception ignored){}cleaned=true;}finally{stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy();if(quickExitRequest!=null){QuickExitState.complete();broadcastEvent("quickExitResult",json("requestId",quickExitRequest,"ok",cleaned,"message",cleaned?"Sessão encerrada.":"Não foi possível concluir a limpeza do rádio."));}}}
 }

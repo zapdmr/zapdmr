@@ -10,7 +10,7 @@
     <a class="brand" href="#"><img src="/ZapDMR.png" alt=""><span><b>ZapDMR</b><small>rádio digital, simples</small></span></a>
     <div class="top-actions"><span id="badge" class="badge"><i></i> Inicializando</span>
       <label class="theme">◐ <select id="theme" aria-label="Tema"><option value="auto">Automático</option><option value="light">Claro</option><option value="dark">Escuro</option></select></label>
-      <button id="jumpSettings" class="gear" aria-label="Configurações">⚙</button></div>
+      <button id="jumpSettings" class="gear" aria-label="Configurações">⚙</button><button id="radioPower" class="gear radio-power" type="button" aria-label="Desconectar ZapDMR" title="Desconectar ZapDMR"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v10M6 5a9 9 0 1 0 12 0"/></svg></button></div>
   </header>
   <main class="container">
     <section id="screen-ptt" class="app-screen" data-screen-panel="ptt" aria-labelledby="pttScreenTitle">
@@ -173,6 +173,6 @@
     </form>
   </dialog>
   <dialog id="profileDialog" class="talkgroup-dialog profile-dialog"><form id="profileForm"><div><p class="kicker">PERFIS DO ZAPDMR</p><h2>Adicionar perfil</h2></div><label>Nome do perfil<input id="newProfileName" maxlength="40" required placeholder="Ex.: XLX026"></label><p class="hint tiny">O novo perfil começa com os dados atuais; depois pode editar ID, servidor e restantes campos sem alterar os outros perfis.</p><div class="dialog-actions"><button id="cancelProfile" class="button secondary" type="button">Cancelar</button><button id="saveProfile" class="button primary" type="submit">Criar perfil</button></div></form></dialog>
-  <div id="toast" role="status" class="toast"></div><script src="/mobile-audio.js" defer></script><script src="/catalog-store.js" defer></script><script src="/talkgroup-activity.js" defer></script><script src="/radio-protocol.js" defer></script><script src="/app.js" defer></script><script src="/operation-controls.js" defer></script><script src="/radio-console.js" defer></script><script src="/radio-bridge.js" defer></script><script src="/attachments-native.js" defer></script><script src="/community-chat.js" defer></script><script src="/community.js" defer></script>
+  <div id="toast" role="status" class="toast"></div><script src="/mobile-audio.js" defer></script><script src="/catalog-store.js" defer></script><script src="/talkgroup-activity.js" defer></script><script src="/radio-protocol.js" defer></script><script src="/app.js" defer></script><script src="/operation-controls.js" defer></script><script src="/radio-console.js" defer></script><script src="/radio-bridge.js" defer></script><script src="/attachments-native.js" defer></script><script src="/community-chat.js" defer></script><script src="/community.js" defer></script><script src="/participant-actions.js" defer></script>
 </body>
 </html>

@@ -1,6 +1,7 @@
 (() => {
   const capacitor = window.Capacitor;
   let plugin;
+  let exiting=false;
   try { plugin = capacitor?.Plugins?.MobileAudio ?? capacitor?.registerPlugin?.('MobileAudio'); }
   catch { plugin = undefined; }
 
@@ -17,6 +18,7 @@
     async configureOperation(operation,console,radioSettings) { if (isAndroid()) return plugin.configureOperation({ operation,...(console?{console}:{}),...(radioSettings?{radioSettings}:{}) }); },
     async bluetoothSpp(options={action:'status'}) { if(isAndroid())return plugin.bluetoothSpp(options); },
     async radioControl(options) { if(isAndroid())return plugin.radioControl(options); },
+    async participantAction(callsign,action) { if(isAndroid())return plugin.participantAction({callsign,action}); },
     async openWhatsApp(phone,text='') { if(isAndroid())return plugin.openWhatsApp({phone,text}); },
     async requestOperationPermission(alias) { if (isAndroid()) return plugin.requestOperationPermission({ alias }); },
     async batterySettings() { if (isAndroid()) return plugin.batterySettings(); },
@@ -32,10 +34,13 @@
     async loadRadioConfig() {
       return isAndroid() ? plugin.loadRadioConfig() : {};
     },
-    async connectRadio(settings, password) {
+    async connectRadio(settings, password, startupReceiveOnly=false) {
+      if(exiting)throw new Error("ZapDMR está saindo.");
       if (!isAndroid()) throw new Error('A ligação HBP nativa está disponível apenas no APK Android.');
-      return plugin.connectRadio({ settings, password, autoReconnect: Boolean(settings?.autoReconnect) });
+      return plugin.connectRadio({ settings, password, autoReconnect: Boolean(settings?.autoReconnect),startupReceiveOnly });
     },
+    async takeQuickExitResume() { return isAndroid()&&!exiting ? plugin.takeQuickExitResume() : {resume:false}; },
+    async quickExit() {if(!isAndroid())return;exiting=true;try{return await plugin.quickExit();}catch(error){exiting=false;throw error;}},
     async disconnectRadio() {
       if (isAndroid()) return plugin.disconnectRadio();
     },

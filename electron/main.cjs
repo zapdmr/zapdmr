@@ -46,7 +46,7 @@ async function openWindow() {
   });
   ipcMain.handle('zapdmr-external',(event,value)=>{
     if(event.sender!==window.webContents||!event.senderFrame?.url.startsWith(localServer.url))throw new Error('Origem inválida.');
-    if(!/^https:\/\/wa\.me\/[1-9]\d{7,14}$/.test(String(value)))throw new Error('Destino externo inválido.');
+    if(!/^https:\/\/wa\.me\/[1-9]\d{7,14}$/.test(String(value))&&!/^https:\/\/www\.qrz\.com\/db\/[A-Z0-9%/]{3,40}$/.test(String(value)))throw new Error('Destino externo inválido.');
     return shell.openExternal(value);
   });
   window.webContents.setWindowOpenHandler(({url})=>{try{const target=new URL(url);if(target.protocol==='https:'&&['wa.me','www.openstreetmap.org','radioid.net','www.zapdmr.com.br'].includes(target.hostname))void shell.openExternal(url);}catch{}return {action:'deny'};});

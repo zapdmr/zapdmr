@@ -45,6 +45,8 @@ public final class MobileAudioPlugin extends Plugin {
     private static final String PREFS = "zapdmr_mobile_secure";
     private static final String CONFIG_KEY = "radio_config";
     private BroadcastReceiver receiver;
+    private PluginCall pendingExit;
+    private String exitRequest;
     private PluginCall pendingPttCall;
     private PluginCall pendingAudioTest;
     private String firmwareTarget = "";
@@ -63,6 +65,15 @@ public final class MobileAudioPlugin extends Plugin {
                 try { data=JSObject.fromJSONObject(new JSONObject(json==null?"{}":json)); }
                 catch(Exception error){data=new JSObject();}
                 notifyListeners("radioEvent",new JSObject().put("event",event).put("data",data),false);
+                if("quickExitResult".equals(event)&&pendingExit!=null&&exitRequest.equals(data.optString("requestId"))){
+                    PluginCall exit=pendingExit;pendingExit=null;exitRequest=null;
+                    if(!data.optBoolean("ok")){exit.reject(data.optString("message","Não foi possível sair."));return;}
+                    // Stop independent APRS/GPS when the operator explicitly closes the app.
+                    AprsService aprs=AprsService.current();if(aprs!=null){aprs.disconnect();getContext().stopService(new Intent(getContext(),AprsService.class));}
+                    if(activityClient!=null){activityClient.close();activityClient=null;}
+                    exit.resolve(new JSObject().put("closed",true));
+                    getActivity().runOnUiThread(()->getActivity().finishAndRemoveTask());
+                }
                 if("status".equals(event)) notifyListeners("radioStatus",data,false);
                 if("vocoder".equals(event)) notifyListeners("vocoderStatus",data,false);
                 if("audioTest".equals(event)&&pendingAudioTest!=null){PluginCall test=pendingAudioTest;pendingAudioTest=null;if(data.optBoolean("ok"))test.resolve(data);else test.reject(data.optString("message","Falha no teste local."),"AUDIO_TEST_FAILED");}
@@ -117,6 +128,18 @@ public final class MobileAudioPlugin extends Plugin {
         });
         if(RadioSessionService.running){Intent update=new Intent(getContext(),RadioSessionService.class).setAction(RadioSessionService.ACTION_OPTIONS).putExtra("operation",options.toString()).putExtra("console",console.toString());JSObject radioSettings=call.getObject("radioSettings",call.getObject("settings"));if(radioSettings!=null)update.putExtra("radioSettings",radioSettings.toString()).putExtra("settings",radioSettings.toString());getContext().startService(update);}
         call.resolve();
+    }
+    @PluginMethod public void participantAction(PluginCall call){
+        String callsign=call.getString("callsign","").toUpperCase(java.util.Locale.ROOT);
+        if(!callsign.matches("(?=.{3,20}$)(?=.*[A-Z])(?=.*[0-9])[A-Z0-9]{1,8}(?:/[A-Z0-9]{1,8}){0,2}")){call.reject("Indicativo inválido.");return;}
+        String action=call.getString("action","");
+        try{if("copy".equals(action)){
+            android.content.ClipboardManager clipboard=(android.content.ClipboardManager)getContext().getSystemService(android.content.Context.CLIPBOARD_SERVICE);
+            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Indicativo",callsign));call.resolve();
+        }else if("qrz".equals(action)){
+            android.net.Uri uri=android.net.Uri.parse("https://www.qrz.com/db/"+android.net.Uri.encode(callsign));
+            getActivity().startActivity(new Intent(Intent.ACTION_VIEW,uri));call.resolve();
+        }else call.reject("Ação inválida.");}catch(Exception error){call.reject("Não foi possível abrir esta ação.");}
     }
     @PluginMethod public void openWhatsApp(PluginCall call){
         String phone=call.getString("phone","");
@@ -195,17 +218,31 @@ public final class MobileAudioPlugin extends Plugin {
     }
 
     @PluginMethod public void connectRadio(PluginCall call) {
+        if(QuickExitState.blocked()){call.reject("ZapDMR está saindo. Abra novamente para conectar.");return;}
         try {
             JSObject settings=call.getObject("settings",new JSObject());
             String password=call.getString("password","");
             boolean autoReconnect=call.getBoolean("autoReconnect",false);
             Intent intent=new Intent(getContext(),RadioSessionService.class).setAction(RadioSessionService.ACTION_CONNECT)
-                .putExtra("settings",settings.toString()).putExtra("password",password).putExtra("autoReconnect",autoReconnect);
+                .putExtra("settings",settings.toString()).putExtra("password",password).putExtra("autoReconnect",autoReconnect).putExtra("startupReceiveOnly",call.getBoolean("startupReceiveOnly",false));
             if(Build.VERSION.SDK_INT>=26)ContextCompat.startForegroundService(getContext(),intent);else getContext().startService(intent);
             call.resolve(new JSObject().put("accepted",true));
-        } catch(Exception error) { call.reject("Não foi possível iniciar a sessão HBP nativa.","RADIO_START_FAILED",error); }
+        } catch(Exception error) { call.reject(error instanceof SecurityException?"Autorize as permissões do Android necessárias à ligação de rádio.":"Não foi possível iniciar a sessão de rádio nativa.","RADIO_START_FAILED",error); }
     }
 
+    @PluginMethod public void takeQuickExitResume(PluginCall call){
+        if(QuickExitState.blocked()){call.resolve(new JSObject().put("resume",false));return;}
+        android.content.SharedPreferences prefs=getContext().getSharedPreferences(QuickExitState.PREFS,Context.MODE_PRIVATE);
+        boolean resume=prefs.getBoolean(QuickExitState.RESUME,false);
+        if(resume&&!prefs.edit().remove(QuickExitState.RESUME).commit()){call.reject("Não foi possível ler o estado da retomada.");return;}
+        call.resolve(new JSObject().put("resume",resume));
+    }
+    @PluginMethod public void quickExit(PluginCall call){
+        if(pendingExit!=null){call.reject("A saída já está em andamento.");return;}
+        pendingExit=call;exitRequest=java.util.UUID.randomUUID().toString();
+        try{getContext().startService(new Intent(getContext(),RadioSessionService.class).setAction(RadioSessionService.ACTION_QUICK_EXIT).putExtra("requestId",exitRequest));}
+        catch(Exception error){pendingExit=null;exitRequest=null;call.reject("Não foi possível encerrar o serviço de rádio.");}
+    }
     @PluginMethod public void disconnectRadio(PluginCall call) {
         getContext().startService(new Intent(getContext(),RadioSessionService.class).setAction(RadioSessionService.ACTION_DISCONNECT));
         call.resolve();
@@ -349,6 +386,7 @@ public final class MobileAudioPlugin extends Plugin {
     }
 
     @Override protected void handleOnDestroy() {
+        if(pendingExit!=null){pendingExit.reject("Interface encerrada durante a saída.");pendingExit=null;exitRequest=null;}
         if(pendingAudioTest!=null){pendingAudioTest.reject("Teste cancelado: aplicação encerrada.");pendingAudioTest=null;}
         databaseWorker.shutdownNow();
         firmwareWorker.shutdownNow();
