@@ -150,8 +150,8 @@ function cleanSettings(value: Partial<AppSettings>): AppSettings {
     totEnabled: value.totEnabled !== false,
     totVisualAlert: value.totVisualAlert !== false,
     totSoundAlert: value.totSoundAlert !== false,
-    txGainPercent: integerSetting(value.txGainPercent, 100, 0, 200),
-    rxVolumePercent: integerSetting(value.rxVolumePercent, 100, 0, 200),
+    txGainPercent: integerSetting(value.txGainPercent, 100, 0, 260),
+    rxVolumePercent: integerSetting(value.rxVolumePercent, 100, 0, 260),
     selectedTalkgroupId: Number.isInteger(value.selectedTalkgroupId) ? Number(value.selectedTalkgroupId) : 724,
     favorites: Array.isArray(value.favorites) ? [...new Set(value.favorites.filter(Number.isInteger))] as number[] : [724]
     ,console: value.console && typeof value.console === 'object' && !Array.isArray(value.console)
@@ -685,8 +685,8 @@ export async function startServer(options: StartOptions = {}) {
       });
       client.send(AudioSidecarMessage.hello);
       client.send(AudioSidecarMessage.startAudio);
-      client.send(AudioSidecarMessage.setTxGain, Buffer.from([settings.txGainPercent]));
-      client.send(AudioSidecarMessage.setRxVolume, Buffer.from([settings.rxVolumePercent]));
+      client.send(AudioSidecarMessage.setTxGain, audioPercentPayload(settings.txGainPercent));
+      client.send(AudioSidecarMessage.setRxVolume, audioPercentPayload(settings.rxVolumePercent));
     } catch (error) {
       if (generation === audioLaunchGeneration && !shuttingDown) {
         console.warn('ZapDMRAudio indisponível:', (error as Error).message);
@@ -918,7 +918,7 @@ export async function startServer(options: StartOptions = {}) {
     if(!/^\+[1-9]\d{7,14}$/.test(phone))return res.status(400).json({message:'WhatsApp obrigatório com +DDI, DDD e número.'});
     const endpoint=String(raw.endpoint||'').replace(/\/$/,'');
     if(endpoint&&!/^https:\/\/[a-z0-9.-]+(?::\d{1,5})?$/i.test(endpoint)&&!/^http:\/\/(?:localhost|127\.0\.0\.1):\d{1,5}$/.test(endpoint))return res.status(400).json({message:'O servidor da comunidade deve usar HTTPS.'});
-    const next={phone,endpoint,sharePhone:raw.sharePhone===true,noticeAccepted:raw.noticeAccepted===true,registrationId:String(raw.registrationId||'').slice(0,80),fingerprint:String(raw.fingerprint||'').slice(0,200),token:String(raw.token||'').slice(0,100),account:raw.account&&typeof raw.account==='object'?raw.account:null};
+    const next={phone,endpoint,sharePhone:raw.sharePhone===true,noticeAccepted:raw.noticeAccepted===true,registrationId:String(raw.registrationId||'').slice(0,80),fingerprint:String(raw.fingerprint||'').slice(0,200),token:String(raw.token||'').slice(0,100),outbox:Array.isArray(raw.outbox)?raw.outbox.slice(0,100).filter((item:any)=>item&&typeof item.text==='string'&&item.text.length<=2000&&typeof item.to==='string'&&/^[a-zA-Z0-9_-]{16,80}$/.test(item.clientId)):[],refreshToken:String(raw.refreshToken||'').slice(0,100),deviceId:String(raw.deviceId||'').slice(0,80),accessExpiresAt:Number(raw.accessExpiresAt)||0,refreshExpiresAt:Number(raw.refreshExpiresAt)||0,account:raw.account&&typeof raw.account==='object'?raw.account:null};
     await saveWindowsSecret(communityFile,JSON.stringify(next));communityProfile=next;return res.json({saved:true});
   }catch{return res.status(500).json({message:'Não foi possível guardar o perfil da comunidade com proteção do Windows.'});}});
   app.get('/api/system-log',(_req,res)=>res.json({entries:systemLog}));
@@ -1274,8 +1274,8 @@ export async function startServer(options: StartOptions = {}) {
       }
       if (audioClient && audioSidecar.state === 'ready') {
         try {
-          audioClient.send(AudioSidecarMessage.setTxGain, Buffer.from([settings.txGainPercent]));
-          audioClient.send(AudioSidecarMessage.setRxVolume, Buffer.from([settings.rxVolumePercent]));
+          audioClient.send(AudioSidecarMessage.setTxGain, audioPercentPayload(settings.txGainPercent));
+          audioClient.send(AudioSidecarMessage.setRxVolume, audioPercentPayload(settings.rxVolumePercent));
         } catch (error) { console.warn('ZapDMRAudio: não foi possível aplicar ganho/volume:', (error as Error).message); }
       }
       if (gateway.status().pttArmed) armTotTimers(totStartedAt ?? Date.now());
@@ -1346,12 +1346,12 @@ export async function startServer(options: StartOptions = {}) {
   });
   app.post('/api/audio-levels', async (req, res, next) => {
     const tx=Number(req.body?.txGainPercent),rx=Number(req.body?.rxVolumePercent);
-    if(!Number.isInteger(tx)||tx<0||tx>200||!Number.isInteger(rx)||rx<0||rx>200)return res.status(400).json({error:'Ganho e volume devem estar entre 0 e 200%.'});
+    if(!Number.isInteger(tx)||tx<0||tx>260||!Number.isInteger(rx)||rx<0||rx>260)return res.status(400).json({error:'Ganho e volume devem estar entre 0 e 260%.'});
     try{
       settings={...settings,txGainPercent:tx,rxVolumePercent:rx};
       const profile=profiles.find(item=>item.id===activeProfileId);if(profile)profile.settings={...settings};
       let applied=false;
-      if(audioClient&&audioSidecar.state==='ready'){audioClient.send(AudioSidecarMessage.setTxGain,Buffer.from([tx]));audioClient.send(AudioSidecarMessage.setRxVolume,Buffer.from([rx]));applied=true;}
+      if(audioClient&&audioSidecar.state==='ready'){audioClient.send(AudioSidecarMessage.setTxGain,audioPercentPayload(tx));audioClient.send(AudioSidecarMessage.setRxVolume,audioPercentPayload(rx));applied=true;}
       await fs.writeFile(settingsFile,JSON.stringify(settings,null,2),{mode:0o600});await persistProfiles();
       return res.json({applied,txGainPercent:tx,rxVolumePercent:rx,message:applied?'Ganho e volume aplicados no motor ativo.':'Valores guardados; aguardando o auxiliar de áudio.'});
     }catch(error){return next(error);}
@@ -1514,3 +1514,6 @@ if (require.main === module) {
     .then(({ url }) => console.log(`ZapDMR local panel: ${url}`))
     .catch((error) => { console.error(error); process.exitCode = 1; });
 }
+
+// Extended gain values use u16 LE; the sidecar still accepts legacy one-byte controls.
+function audioPercentPayload(value:number):Buffer{const data=Buffer.alloc(2);data.writeUInt16LE(Math.max(0,Math.min(260,value)));return data;}

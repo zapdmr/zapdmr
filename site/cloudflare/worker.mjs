@@ -1,7 +1,8 @@
-import {handleApi, handleDownload, cleanup, discoverReleaseNotifications} from './api.mjs';
+import {pushConfigured} from './chat-push.mjs';
+import {handleApi, handleDownload, cleanup, discoverReleaseNotifications, dispatchChatPush} from './api.mjs';
 import {publicPagePaths, renderPublicPage, sitemap} from '../public-pages.mjs';
 
-const assetsVersion = '20261021-otp-retry-1';
+const assetsVersion = '20261022-chat-146';
 const aliases = {
   '/downloads': '/#downloads', '/downloads/': '/#downloads',
   '/recursos': '/#recursos', '/recursos/': '/#recursos',
@@ -31,7 +32,7 @@ function protect(response, request, env) {
   if (origin && allowedOrigin(origin, env.PUBLIC_ORIGIN, request.url)) {
     headers.set('Access-Control-Allow-Origin', origin);
     headers.set('Vary', 'Origin');
-    headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-ZapDMR-Platform, X-ZapDMR-Version-Code');
     headers.set('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
   }
   return new Response(request.method === 'HEAD' ? null : response.body, {
@@ -60,7 +61,7 @@ async function route(request, env) {
   if (pathname === '/healthz') {
     if (!env.DB) return json(503, {ok: false, message: 'Banco ainda não configurado.'});
     await env.DB.prepare('SELECT 1').first();
-    return json(200, {ok: true, version: '1.4.5'});
+    return json(200, {ok: true, version: '1.4.6'});
   }
   if (aliases[pathname]) return new Response(null, {status: 308, headers: {Location: aliases[pathname]}});
   const production = Boolean(env.OWNER_NAME && env.PRIVACY_EMAIL);
@@ -87,15 +88,16 @@ async function route(request, env) {
 
 export default {
   scheduled(event, env, ctx) {
-    ctx.waitUntil(Promise.allSettled([cleanup(env),discoverReleaseNotifications(env)]));
+    ctx.waitUntil(Promise.allSettled([...(new Date(event.scheduledTime).getUTCMinutes()===0?[cleanup(env),discoverReleaseNotifications(env)]:[]),...(pushConfigured(env)?[dispatchChatPush(env)]:[])]));
   },
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     let response;
     try { response = await route(request, env); }
     catch (error) {
       const status = Number.isInteger(error.status) ? error.status : 503;
       response = json(status, {message: error.status ? error.message : 'O serviço ainda não está disponível. Tente novamente mais tarde.'});
     }
+    if(ctx&&pushConfigured(env)&&request.method==='POST'&&new URL(request.url).pathname==='/v1/messages'&&response.ok)ctx.waitUntil(dispatchChatPush(env));
     return protect(response, request, env);
   }
 };

@@ -21,9 +21,9 @@ class Element{
  isNative=true;power.onclick();await dialogs[1].children[3].onclick();assert(calls.includes('nativeExit'));
  // Execute the actual directory search with identity matching, without network/accounts.
  const source=fs.readFileSync('web/community-chat.js','utf8');const search=source.slice(source.indexOf('async function search(query,expected){'),source.indexOf('\n    function reopen()',source.indexOf('async function search(query,expected){')));
- const events=[];const c={epoch:0,token:()=>true,clear:()=>{},report:s=>events.push(s),AbortController,remote:async()=>({user:c.user}),dialog:{open:true},peer:null,el:()=>({}),renderPeer:()=>{},start:()=>events.push('history'),window:{ZapDMRCommunity:{privateConfig:()=>({account:{id:'self'}})}}};vm.createContext(c);vm.runInContext(search+';this.lookup=search;',c);
+ const events=[];const c={epoch:0,token:()=>true,clear:()=>{},report:s=>events.push(s),AbortController,remote:async()=>({user:c.user}),dialog:{open:true},peer:null,el:()=>({}),renderPeer:()=>{},renderPending:()=>{},start:()=>events.push('history'),window:{ZapDMRCommunity:{privateConfig:()=>({account:{id:'self'}})}}};vm.createContext(c);vm.runInContext(search+';this.lookup=search;',c);
  c.user={id:'peer',callsign:'K1ABC',dmrId:'1234567'};await c.lookup('1234567',{callsign:'K1ABC',dmrId:'1234567'});assert(events.includes('history'));
  events.length=0;c.user={id:'wrong',callsign:'K2XYZ',dmrId:'1234567'};await c.lookup('1234567',{callsign:'K1ABC',dmrId:'1234567'});assert(!events.includes('history'));assert.equal(c.peer,null);
- events.length=0;c.user=null;await c.lookup('K1ABC',{callsign:'K1ABC'});assert(!events.includes('history'));assert(events.some(s=>s.includes('ainda não tem')));
+ events.length=0;c.user=null;await c.lookup('K1ABC',{callsign:'K1ABC'});assert(!events.includes('history'));assert(events.some(s=>s.includes('ainda não possui cadastro')));
  console.log('PASS participant menu, QRZ, clipboard, matched/missing/mismatched chat account, power confirmation and TX refusal (UI harness; no physical device).');
 })().catch(e=>{console.error(e);process.exitCode=1;});

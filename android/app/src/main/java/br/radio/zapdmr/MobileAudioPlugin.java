@@ -72,7 +72,7 @@ public final class MobileAudioPlugin extends Plugin {
                     AprsService aprs=AprsService.current();if(aprs!=null){aprs.disconnect();getContext().stopService(new Intent(getContext(),AprsService.class));}
                     if(activityClient!=null){activityClient.close();activityClient=null;}
                     exit.resolve(new JSObject().put("closed",true));
-                    getActivity().runOnUiThread(()->getActivity().finishAndRemoveTask());
+                    if(!exit.getBoolean("forUpdate",false))getActivity().runOnUiThread(()->getActivity().finishAndRemoveTask());
                 }
                 if("status".equals(event)) notifyListeners("radioStatus",data,false);
                 if("vocoder".equals(event)) notifyListeners("vocoderStatus",data,false);
@@ -178,7 +178,7 @@ public final class MobileAudioPlugin extends Plugin {
     }
     @PluginMethod public void setAudioLevels(PluginCall call){
         int tx=call.getInt("txGainPercent",100),rx=call.getInt("rxVolumePercent",100);
-        if(tx<0||tx>200||rx<0||rx>200){call.reject("Ganho e volume devem estar entre 0 e 200%.");return;}
+        if(tx<0||tx>260||rx<0||rx>260){call.reject("Ganho e volume devem estar entre 0 e 260%.");return;}
         Intent intent=new Intent(getContext(),RadioSessionService.class).setAction(RadioSessionService.ACTION_AUDIO_LEVELS).putExtra("txGainPercent",tx).putExtra("rxVolumePercent",rx);
         getContext().startService(intent);call.resolve(new JSObject().put("applied",true).put("txGainPercent",tx).put("rxVolumePercent",rx));
     }
@@ -201,20 +201,31 @@ public final class MobileAudioPlugin extends Plugin {
         getContext().startActivity(intent);call.resolve();
     }
 
-    @PluginMethod public void saveRadioConfig(PluginCall call) {
-        try {
-            JSONObject value=call.getData();
-            String encrypted=encrypt(value==null?"{}":value.toString());
-            getContext().getSharedPreferences(PREFS,Context.MODE_PRIVATE).edit().putString(CONFIG_KEY,encrypted).apply();
-            call.resolve(new JSObject().put("saved",true));
-        } catch(Exception error) { call.reject("Não foi possível guardar o perfil protegido pelo Android.","SECURE_STORAGE_FAILED",error); }
+    private static final Object CONFIG_LOCK=new Object();
+    private JSONObject readConfig() throws Exception {
+        String encrypted=getContext().getSharedPreferences(PREFS,Context.MODE_PRIVATE).getString(CONFIG_KEY,null);
+        return encrypted==null?new JSONObject():new JSONObject(decrypt(encrypted));
     }
-
+    private void writeConfig(JSONObject value) throws Exception {
+        if(!getContext().getSharedPreferences(PREFS,Context.MODE_PRIVATE).edit().putString(CONFIG_KEY,encrypt(value.toString())).commit())throw new java.io.IOException("Secure storage failed");
+    }
+    @PluginMethod public void saveRadioConfig(PluginCall call) {
+        try { synchronized(CONFIG_LOCK) {
+            JSONObject value=new JSONObject(call.getData().toString()),stored=readConfig();
+            // Radio settings snapshots must not replace a newer community session.
+            if(stored.has("community"))value.put("community",stored.getJSONObject("community"));
+            writeConfig(value);
+        } call.resolve(new JSObject().put("saved",true));
+        }catch(Exception error){call.reject("Não foi possível guardar o perfil protegido.","SECURE_STORAGE_FAILED",error);}
+    }
+    @PluginMethod public void saveCommunityProfile(PluginCall call) {
+        try { synchronized(CONFIG_LOCK) { JSONObject value=readConfig();value.put("community",call.getObject("community",new JSObject()));writeConfig(value); }
+            call.resolve(new JSObject().put("saved",true));
+        }catch(Exception error){call.reject("Não foi possível guardar a sessão protegida.","SECURE_STORAGE_FAILED",error);}
+    }
     @PluginMethod public void loadRadioConfig(PluginCall call) {
-        try {
-            String encrypted=getContext().getSharedPreferences(PREFS,Context.MODE_PRIVATE).getString(CONFIG_KEY,null);
-            call.resolve(encrypted==null?new JSObject():JSObject.fromJSONObject(new JSONObject(decrypt(encrypted))));
-        } catch(Exception error) { call.reject("Não foi possível ler o perfil protegido.","SECURE_STORAGE_FAILED",error); }
+        try { synchronized(CONFIG_LOCK) { call.resolve(JSObject.fromJSONObject(readConfig())); } }
+        catch(Exception error){call.reject("Não foi possível ler o perfil protegido.","SECURE_STORAGE_FAILED",error);}
     }
 
     @PluginMethod public void connectRadio(PluginCall call) {
@@ -243,6 +254,7 @@ public final class MobileAudioPlugin extends Plugin {
         try{getContext().startService(new Intent(getContext(),RadioSessionService.class).setAction(RadioSessionService.ACTION_QUICK_EXIT).putExtra("requestId",exitRequest));}
         catch(Exception error){pendingExit=null;exitRequest=null;call.reject("Não foi possível encerrar o serviço de rádio.");}
     }
+    @PluginMethod public void resumeAfterAppUpdate(PluginCall call){if(!QuickExitState.open()){call.reject("O rádio ainda está encerrando.");return;}call.resolve();}
     @PluginMethod public void disconnectRadio(PluginCall call) {
         getContext().startService(new Intent(getContext(),RadioSessionService.class).setAction(RadioSessionService.ACTION_DISCONNECT));
         call.resolve();

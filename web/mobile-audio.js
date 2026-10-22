@@ -21,6 +21,7 @@
     async participantAction(callsign,action) { if(isAndroid())return plugin.participantAction({callsign,action}); },
     async openWhatsApp(phone,text='') { if(isAndroid())return plugin.openWhatsApp({phone,text}); },
     async requestOperationPermission(alias) { if (isAndroid()) return plugin.requestOperationPermission({ alias }); },
+    async saveCommunityProfile(community) { return plugin.saveCommunityProfile({community}); },
     async batterySettings() { if (isAndroid()) return plugin.batterySettings(); },
     async initialize(onEvent) {
       if (!isAndroid()) return false;
@@ -40,6 +41,8 @@
       return plugin.connectRadio({ settings, password, autoReconnect: Boolean(settings?.autoReconnect),startupReceiveOnly });
     },
     async takeQuickExitResume() { return isAndroid()&&!exiting ? plugin.takeQuickExitResume() : {resume:false}; },
+    async prepareAppUpdate() {if(!isAndroid())return;exiting=true;try{return await plugin.quickExit({forUpdate:true});}catch(error){exiting=false;throw error;}},
+    async resumeAfterAppUpdate() {await plugin.resumeAfterAppUpdate();exiting=false;},
     async quickExit() {if(!isAndroid())return;exiting=true;try{return await plugin.quickExit();}catch(error){exiting=false;throw error;}},
     async disconnectRadio() {
       if (isAndroid()) return plugin.disconnectRadio();

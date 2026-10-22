@@ -162,7 +162,7 @@
 
   const audioCard=$('#audioTest').parentElement;
   const micTest=document.createElement('button');micTest.id='microphoneTest';micTest.type='button';micTest.className='button secondary span-all';micTest.textContent='Testar microfone · gravar 3 s e ouvir';audioCard.insertBefore(micTest,$('#audioTestResult'));
-  const audioApplied=document.createElement('p');audioApplied.className='hint tiny span-all';audioApplied.id='audioLevelsApplied';audioApplied.textContent='Ganho e volume são aplicados imediatamente, sem reconectar.';audioCard.append(audioApplied);
+  const audioApplied=document.createElement('p');audioApplied.className='hint tiny span-all';audioApplied.id='audioLevelsApplied';audioApplied.textContent='TX e RX ajustáveis até 260% (+30% de margem). O ganho é aplicado sem reconectar. Reduza se a voz ficar distorcida.';audioCard.append(audioApplied);
   let audioTimer;
   function labelGain(id,value){const db=value>0?(20*Math.log10(value/100)).toFixed(1)+' dB':'silenciado';$('#'+id).textContent=value+'% ('+db+')';}
   function queueAudioLevels(){
@@ -173,7 +173,7 @@
     }).catch(error=>{audioApplied.textContent=error.message;toast(error.message);});return optionsSave;
   }
   for(const [id,field,label]of [['txGainPercent','txGainPercent','txGainValue'],['rxVolumePercent','rxVolumePercent','rxVolumeValue']]){
-    $('#'+id).oninput=event=>{const value=Math.max(0,Math.min(200,Number(event.target.value)));settings[field]=value;labelGain(label,value);audioApplied.textContent='A aplicar no motor…';clearTimeout(audioTimer);audioTimer=setTimeout(()=>void queueAudioLevels(),150);};
+    $('#'+id).oninput=event=>{const value=Math.max(0,Math.min(260,Number(event.target.value)));settings[field]=value;labelGain(label,value);audioApplied.textContent='A aplicar no motor…';clearTimeout(audioTimer);audioTimer=setTimeout(()=>void queueAudioLevels(),150);};
     $('#'+id).onchange=()=>{clearTimeout(audioTimer);void queueAudioLevels();};
   }
   async function runLocalTest(microphone){

@@ -25,6 +25,7 @@ CREATE INDEX IF NOT EXISTS registrations_identity ON registrations(callsign,phon
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   callsign TEXT UNIQUE NOT NULL,
+  display_name TEXT NOT NULL DEFAULT '',
   dmr_id TEXT UNIQUE NOT NULL,
   phone_cipher TEXT NOT NULL,
   phone_hash TEXT NOT NULL,
@@ -81,6 +82,7 @@ CREATE TABLE IF NOT EXISTS messages (
   sender TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   recipient TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   body_cipher TEXT NOT NULL,
+  delivered_at INTEGER,
   at INTEGER NOT NULL,
   read_at INTEGER
 );
@@ -171,3 +173,42 @@ CREATE TABLE IF NOT EXISTS release_notification_suppressions (
  phone_hash TEXT PRIMARY KEY,
  stopped_at INTEGER NOT NULL
 );
+
+-- Additive: legacy sessions, messages and account identifiers remain valid.
+
+
+CREATE INDEX IF NOT EXISTS messages_delivery ON messages(recipient,delivered_at,at,id);
+CREATE TABLE IF NOT EXISTS auth_devices (
+ id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ refresh_hash TEXT UNIQUE NOT NULL, previous_hash TEXT, refresh_expires_at INTEGER NOT NULL,
+ rotated_at INTEGER NOT NULL, created_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL,
+ revoked_at INTEGER, token_cipher TEXT NOT NULL, bootstrap_hash TEXT
+);
+CREATE INDEX IF NOT EXISTS auth_devices_previous ON auth_devices(previous_hash);
+CREATE TABLE IF NOT EXISTS session_devices (
+ session_hash TEXT PRIMARY KEY REFERENCES sessions(hash) ON DELETE CASCADE,
+ device_id TEXT NOT NULL REFERENCES auth_devices(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS session_devices_device ON session_devices(device_id);
+
+CREATE TABLE IF NOT EXISTS push_devices (
+ device_id TEXT PRIMARY KEY REFERENCES auth_devices(id) ON DELETE CASCADE,
+ user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ token_hash TEXT UNIQUE NOT NULL, token_cipher TEXT NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS push_outbox (
+ message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+ device_id TEXT NOT NULL REFERENCES push_devices(device_id) ON DELETE CASCADE,
+ attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
+ PRIMARY KEY(message_id,device_id)
+);
+CREATE INDEX IF NOT EXISTS push_due ON push_outbox(next_at,expires_at);
+
+CREATE TABLE IF NOT EXISTS app_releases (
+ version_code INTEGER PRIMARY KEY, version TEXT NOT NULL,
+ changelog TEXT NOT NULL, apk_url TEXT NOT NULL, sha256 TEXT NOT NULL,
+ bytes INTEGER NOT NULL, min_supported_code INTEGER NOT NULL DEFAULT 0,
+ required_reason TEXT NOT NULL DEFAULT '', published INTEGER NOT NULL DEFAULT 0,
+ created_at INTEGER NOT NULL, published_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS app_release_latest ON app_releases(published,version_code DESC);

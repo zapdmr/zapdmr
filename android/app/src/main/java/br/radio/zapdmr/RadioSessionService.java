@@ -389,7 +389,7 @@ public final class RadioSessionService extends Service {
             } catch(Exception error){emit("error",json("message","Não foi possível aplicar as opções de rádio: "+safeMessage(error)));}
 
         } else if(ACTION_AUDIO_LEVELS.equals(action)) {
-            try{JSONObject updated=new JSONObject(settings.toString());updated.put("txGainPercent",Math.max(0,Math.min(200,intent.getIntExtra("txGainPercent",100))));updated.put("rxVolumePercent",Math.max(0,Math.min(200,intent.getIntExtra("rxVolumePercent",100))));settings=updated;emit("audioSettings",json("applied",true,"txGainPercent",settings.optInt("txGainPercent"),"rxVolumePercent",settings.optInt("rxVolumePercent")));}catch(Exception ignored){}
+            try{JSONObject updated=new JSONObject(settings.toString());updated.put("txGainPercent",Math.max(0,Math.min(260,intent.getIntExtra("txGainPercent",100))));updated.put("rxVolumePercent",Math.max(0,Math.min(260,intent.getIntExtra("rxVolumePercent",100))));settings=updated;emit("audioSettings",json("applied",true,"txGainPercent",settings.optInt("txGainPercent"),"rxVolumePercent",settings.optInt("rxVolumePercent")));}catch(Exception ignored){}
         } else if(ACTION_AUDIO_TEST.equals(action)) {
             runAudioTest(intent.getBooleanExtra("microphone",false));
         }
@@ -690,7 +690,7 @@ public final class RadioSessionService extends Service {
                 int got=0; while(got<samples.length&&ptt.get()){int count=audio.read(samples,got,samples.length-got,AudioRecord.READ_BLOCKING);if(count<0)throw new java.io.IOException("Falha ao ler microfone: "+count);got+=count;}
                 if(!ptt.get()||got!=samples.length)break;
                 if(voxTransmitting){double sum=0;for(short sample:samples)sum+=(double)sample*sample;double db=20*Math.log10(Math.max(1e-6,Math.sqrt(sum/samples.length)/32768));if(db>=controls().optDouble("voxThreshold",-35))voxLastLoud=System.currentTimeMillis();if(System.currentTimeMillis()-voxLastLoud>=Math.max(300,Math.min(5000,controls().optInt("voxHangMs",1200))))break;}
-                int gain=Math.max(0,Math.min(200,settings.optInt("txGainPercent",100)));
+                int gain=Math.max(0,Math.min(260,settings.optInt("txGainPercent",100)));
                 frame.clear();for(short sample:samples){int amplified=sample*gain/100;frame.putShort((short)Math.max(Short.MIN_VALUE,Math.min(Short.MAX_VALUE,amplified)));}
                 emitAudioLevel("TX", frame.array(), txTalkgroup, Integer.parseInt(settings.getString("dmrId")));
                 byte[] word=vocoder.encodeFec(frame.array());
@@ -724,7 +724,7 @@ public final class RadioSessionService extends Service {
         if(destroyed||QuickExitState.blocked())return false;
         synchronized(playbackLock){try {
             if(!acquireAudioFocus())return false; // Drop stale PCM; HBP and vocoder keep receiving while focus is unavailable.
-            int volume=Math.max(0,Math.min(200,settings.optInt("rxVolumePercent",100)));
+            int volume=Math.max(0,Math.min(260,settings.optInt("rxVolumePercent",100)));
             if(volume!=100){pcm=pcm.clone();for(int i=0;i+1<pcm.length;i+=2){int sample=(short)(((pcm[i+1]&255)<<8)|(pcm[i]&255));int scaled=Math.max(-32768,Math.min(32767,sample*volume/100));pcm[i]=(byte)scaled;pcm[i+1]=(byte)(scaled>>8);}}
             AudioTrack track=player;
             if(track==null||track.getState()!=AudioTrack.STATE_INITIALIZED){

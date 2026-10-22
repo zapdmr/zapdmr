@@ -22,16 +22,19 @@ public class MainActivity extends BridgeActivity {
         }catch(Exception ignored){}
         return super.dispatchKeyEvent(event);
     }
+    @Override protected void onNewIntent(android.content.Intent intent){super.onNewIntent(intent);setIntent(intent);}
     private void finishWhenRadioStops(){if(QuickExitState.closing())getWindow().getDecorView().postDelayed(this::finishWhenRadioStops,100);else finishAndRemoveTask();}
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(MobileAudioPlugin.class);
         registerPlugin(AprsPlugin.class);
         registerPlugin(AttachmentsPlugin.class);
+        registerPlugin(ChatPushPlugin.class);
+        registerPlugin(AppUpdatePlugin.class);
         super.onCreate(savedInstanceState);
         if(!QuickExitState.open()){finishWhenRadioStops();return;}
         android.webkit.WebView webView=getBridge().getWebView();
         String agent=webView.getSettings().getUserAgentString();
-        if(!agent.contains("ZapDMR/"))webView.getSettings().setUserAgentString(agent+" ZapDMR/1.4.5");
+        if(!agent.contains("ZapDMR/"))webView.getSettings().setUserAgentString(agent+" ZapDMR/1.4.6");
     }
 }

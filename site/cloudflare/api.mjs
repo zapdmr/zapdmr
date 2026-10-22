@@ -1,3 +1,7 @@
+import {appReleases} from './app-releases.mjs';
+import {chatPush,pushConfigured} from './chat-push.mjs';
+import {sessionService} from './auth-sessions.mjs';
+import {chatInbox} from './chat-inbox.mjs';
 // GPL-3.0-only. Cloudflare Workers + D1 API; no Node compatibility flag required.
 // Route handling, CORS, security headers, static assets and scheduled cleanup
 // are composed by the Worker entry point. No credentials are generated here.
@@ -10,7 +14,7 @@ const releaseNotices=createReleaseNotifications({failure,json,body,rate,hash,sam
 
 function failure(status,message,details={}){return Object.assign(new Error(message),{status,...details});}
 function json(status,value,headers={}){return new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...headers}});}
-function errorResponse(error){return json(error.status||500,{message:error.status?error.message:'Não foi possível concluir o pedido. Tente novamente.',...(Number.isInteger(error.retryAfterSeconds)?{retryAfterSeconds:error.retryAfterSeconds}:{})});}
+function errorResponse(error){return json(error.status||500,{message:error.status?error.message:'Não foi possível concluir o pedido. Tente novamente.',...(/^(SESSION_[A-Z_]+|APP_UPDATE_REQUIRED)$/.test(error.code||'')?{code:error.code}:{}),...(Number.isInteger(error.retryAfterSeconds)?{retryAfterSeconds:error.retryAfterSeconds}:{})});}
 function hex(bytes){return Array.from(new Uint8Array(bytes),byte=>byte.toString(16).padStart(2,'0')).join('');}
 function unhex(value){return Uint8Array.from(value.match(/../g),part=>parseInt(part,16));}
 function base64(bytes){let text='';for(const byte of new Uint8Array(bytes))text+=String.fromCharCode(byte);return btoa(text);}
@@ -79,27 +83,27 @@ async function rate(config,request,bucket,max=60,period=60000,identity){
 }
 async function currentUser(config,request){
   const token=(request.headers.get('Authorization')||'').replace(/^Bearer /,'');
-  if(!/^[A-Za-z0-9_-]{43}$/.test(token))throw failure(401,'Entre na comunidade com o código recebido no seu número.');
-  const row=await config.db.prepare('SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.hash=? AND s.expires_at>?').bind(await hash(config,token),Date.now()).first();
-  if(!row)throw failure(401,'Sessão expirada. Confirme novamente o número.');return row;
+  if(!/^[A-Za-z0-9_-]{43}$/.test(token))throw failure(401,'Entre na comunidade com o código recebido no seu número.',{code:'SESSION_INVALID'});
+  const row=await config.db.prepare('SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN session_devices d ON d.session_hash=s.hash LEFT JOIN auth_devices a ON a.id=d.device_id WHERE s.hash=? AND s.expires_at>? AND u.whatsapp_verified=1 AND (d.device_id IS NULL OR a.revoked_at IS NULL AND a.refresh_expires_at>?)').bind(await hash(config,token),Date.now(),Date.now()).first();
+  if(!row)throw failure(401,'Sessão expirada ou revogada.',{code:'SESSION_EXPIRED'});return row;
 }
-async function publicUser(config,row,own=false){return {id:row.id,callsign:row.callsign,dmrId:row.dmr_id,verified:Boolean(row.whatsapp_verified),whatsapp_verified:Boolean(row.whatsapp_verified),verificationMethod:row.verification_method,sharePhone:Boolean(row.share_phone),...(own?await releaseNotices.preference(config,row.id):{}),...(own||row.share_phone?{whatsapp:await unseal(config,row.phone_cipher)}:{})};}
-async function publicMessage(config,row,own){return {id:row.id,from:row.sender,to:row.recipient,text:await unseal(config,row.body_cipher),at:row.at,readAt:row.read_at,direction:row.sender===own?'out':'in',state:row.read_at?'read':'sent',...(row.attachment_id?{attachment:{id:row.attachment_id,name:await unseal(config,row.attachment_name),size:row.attachment_size,mime:row.attachment_mime,kind:row.attachment_mime.startsWith('image/')?'image':'document'}}:{})};}
+async function publicUser(config,row,own=false){return {id:row.id,callsign:row.callsign,dmrId:row.dmr_id,displayName:row.display_name||row.callsign,verified:Boolean(row.whatsapp_verified),whatsapp_verified:Boolean(row.whatsapp_verified),verificationMethod:row.verification_method,sharePhone:Boolean(row.share_phone),...(own?await releaseNotices.preference(config,row.id):{}),...(own||row.share_phone?{whatsapp:await unseal(config,row.phone_cipher)}:{})};}
+async function publicMessage(config,row,own){return {id:row.id,from:row.sender,to:row.recipient,text:await unseal(config,row.body_cipher),at:row.at,readAt:row.read_at,deliveredAt:row.delivered_at||row.read_at||null,direction:row.sender===own?'out':'in',state:row.read_at?'read':'sent',...(row.attachment_id?{attachment:{id:row.attachment_id,name:await unseal(config,row.attachment_name),size:row.attachment_size,mime:row.attachment_mime,kind:row.attachment_mime.startsWith('image/')?'image':'document'}}:{})};}
 function downloadMetadata(env,config,platform){
   if(!config.downloads[platform])return {available:false};
   const prefix=platform==='android'?'DOWNLOAD_ANDROID':'DOWNLOAD_WINDOWS',bytes=Number(env[prefix+'_BYTES']),sha256=env[prefix+'_SHA256'];
   return {available:true,...(Number.isSafeInteger(bytes)&&bytes>0?{bytes}:{}),...(/^[a-f\d]{64}$/i.test(sha256||'')?{sha256:sha256.toLowerCase()}:{})};
 }
 async function downloadToken(config,id,platform){const value=base64url(encoder.encode(JSON.stringify({id,platform,expires:Date.now()+900000}))),signature=base64url(await crypto.subtle.sign('HMAC',config.downloadHmac,encoder.encode(value)));return value+'.'+signature;}
-async function pairAvailable(config,own,peer){return config.db.prepare('SELECT u.id FROM users u WHERE u.id=? AND NOT EXISTS(SELECT 1 FROM blocks b WHERE (b.owner=? AND b.peer=u.id) OR (b.owner=u.id AND b.peer=?))').bind(peer,own,own).first();}
+async function pairAvailable(config,own,peer){return config.db.prepare('SELECT u.id FROM users u WHERE u.id=? AND u.whatsapp_verified=1 AND NOT EXISTS(SELECT 1 FROM blocks b WHERE (b.owner=? AND b.peer=u.id) OR (b.owner=u.id AND b.peer=?))').bind(peer,own,own).first();}
 const messageSelect=`SELECT m.*,a.id AS attachment_id,a.name_cipher AS attachment_name,a.size AS attachment_size,a.mime AS attachment_mime FROM messages m LEFT JOIN message_attachments ma ON ma.message_id=m.id LEFT JOIN attachments a ON a.id=ma.attachment_id`;
 async function messageBatch(config,own,peer,after,receiptAfter,includeReceipts,before=0){
   const initial=!after||before>0;
   const statements=[config.db.prepare(messageSelect+' WHERE ((m.sender=? AND m.recipient=?) OR (m.sender=? AND m.recipient=?)) AND m.at>=?'+(before?' AND m.at<?':'')+' ORDER BY m.at '+(initial?'DESC':'ASC')+',m.id '+(initial?'DESC':'ASC')+' LIMIT 100').bind(own,peer,peer,own,after,...(before?[before]:[]))];
-  if(includeReceipts)statements.push(config.db.prepare('SELECT id,read_at AS readAt FROM messages WHERE sender=? AND recipient=? AND read_at>=? ORDER BY read_at,id LIMIT 100').bind(own,peer,receiptAfter));
+  if(includeReceipts)statements.push(config.db.prepare('SELECT id,read_at AS readAt,delivered_at AS deliveredAt,MAX(COALESCE(read_at,0),COALESCE(delivered_at,0)) AS receiptAt FROM messages WHERE sender=? AND recipient=? AND MAX(COALESCE(read_at,0),COALESCE(delivered_at,0))>0 AND MAX(COALESCE(read_at,0),COALESCE(delivered_at,0))>=? ORDER BY receiptAt,id LIMIT 100').bind(own,peer,receiptAfter));
   const results=await config.db.batch(statements),receipts=includeReceipts?results[1].results:[];
   const rows=initial?results[0].results.reverse():results[0].results;
-  return {messages:await Promise.all(rows.map(row=>publicMessage(config,row,own))),receipts,nextCursor:rows.length?rows[rows.length-1].at+1:after,nextReceiptCursor:receipts.length?receipts[receipts.length-1].readAt+1:receiptAfter,hasMore:initial&&rows.length===100,beforeCursor:rows.length?rows[0].at:0};
+  return {messages:await Promise.all(rows.map(row=>publicMessage(config,row,own))),receipts,nextCursor:rows.length?rows[rows.length-1].at+1:after,nextReceiptCursor:receipts.length?receipts[receipts.length-1].receiptAt+1:receiptAfter,hasMore:initial&&rows.length===100,beforeCursor:rows.length?rows[0].at:0};
 }
 function waitForMessages(signal){return new Promise((resolve,reject)=>{if(signal.aborted)return reject(failure(499,'Pedido cancelado.'));const finish=()=>{signal.removeEventListener('abort',abort);resolve();},timer=setTimeout(finish,3000),abort=()=>{clearTimeout(timer);signal.removeEventListener('abort',abort);reject(failure(499,'Pedido cancelado.'));};signal.addEventListener('abort',abort,{once:true});});}
 async function deliverCode(config,env,request,row,code){
@@ -174,7 +178,7 @@ export async function handleApi(request,env,url=new URL(request.url)){
 async function api(request,env,url,config){
   const route=url.pathname,method=request.method,db=config.db;
   const noticeResponse=await releaseNotices.handleApi(request,env,url,config);if(noticeResponse)return noticeResponse;
-  if(route==='/v1/status'&&method==='GET'){const mode=await verificationMode(config,env);return json(200,{version:'1.4.5',chatAttachments:true,maxAttachmentBytes:15728640,registration:true,verificationConfigured:mode!=='unavailable',verificationMode:mode,developmentMode:false,bridgeConnected:await bridgeConnected(config,env),downloadRequiresVerification:true,owner:env.OWNER_NAME,privacyEmail:env.PRIVACY_EMAIL,downloads:{android:downloadMetadata(env,config,'android'),windows:downloadMetadata(env,config,'windows')}});}
+  if(route==='/v1/status'&&method==='GET'){const mode=await verificationMode(config,env);return json(200,{version:'1.4.6',chatAttachments:true,maxAttachmentBytes:15728640,registration:true,verificationConfigured:mode!=='unavailable',verificationMode:mode,developmentMode:false,bridgeConnected:await bridgeConnected(config,env),downloadRequiresVerification:true,owner:env.OWNER_NAME,privacyEmail:env.PRIVACY_EMAIL,downloads:{android:downloadMetadata(env,config,'android'),windows:downloadMetadata(env,config,'windows')}});}
   if(route.startsWith('/v1/whatsapp/')&&method==='POST'){
     await bridgeAuth(config,env,request);await rate(config,request,'whatsapp-bridge',120);const raw=await body(request),now=Date.now();
     if(route==='/v1/whatsapp/webhook'){
@@ -208,6 +212,15 @@ async function api(request,env,url,config){
       return json(200,{ok:true});
     }
     return json(404,{message:'Recurso da ponte não encontrado.'});
+  }
+  const releases=appReleases(config,{failure});
+  if(route==='/v1/app-releases/android'&&method==='GET')return json(200,{release:await releases.latest()});
+  if(route==='/admin/releases'){
+    await rate(config,request,'admin-releases',30);let credentials='';try{const header=request.headers.get('Authorization')||'';if(header.startsWith('Basic '))credentials=decoder.decode(unbase64(header.slice(6)));}catch{}
+    if(!await sameHash(config,credentials,await hash(config,'admin:'+env.ADMIN_PASSWORD)))return json(401,{message:'Autenticação administrativa necessária.'},{'WWW-Authenticate':'Basic realm="ZapDMR"'});
+    if(method==='GET'){if(url.searchParams.get('format')==='json')return json(200,{releases:await releases.history()});return new Response(await releases.page(),{headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'}});}
+    if(method==='POST'){const origin=request.headers.get('Origin');if(origin!==config.origin&&origin!==url.origin)throw failure(403,'Origem administrativa inválida.');if(Number(request.headers.get('Content-Length'))>20000)throw failure(413,'Formulário grande demais.');const isJson=(request.headers.get('Content-Type')||'').includes('application/json');const raw=isJson?await body(request):Object.fromEntries(new URLSearchParams((await request.text()).slice(0,20000)));const result=raw.action==='unpublish'?await releases.unpublish(raw.versionCode):await releases.publish(raw);return isJson?json(200,result):new Response(null,{status:303,headers:{Location:'/admin/releases'}});}
+    return json(405,{message:'Método não permitido.'});
   }
   if(route==='/admin'||route==='/admin/'){
     if(method!=='GET')return json(405,{message:'Método não permitido.'},{Allow:'GET'});
@@ -245,6 +258,8 @@ async function api(request,env,url,config){
     const plain=JSON.parse(await unseal(config,row.challenge_cipher)),challenge=await challengeView(config,env,row,plain);
     return json(200,{status:row.mode==='reverse'&&row.reverse_confirmed_at?'confirmed':'pending',expiresInSeconds:challenge.expiresInSeconds,retryAfterSeconds:challenge.retryAfterSeconds,challenge});
   }
+  if(route==='/v1/auth/refresh'&&method==='POST'){await rate(config,request,'auth-refresh',60);const raw=await body(request);return json(200,await sessionService(config,{hash,seal,unseal,randomToken,failure}).refresh(String(raw.refreshToken||'')));}
+  if(route==='/v1/auth/logout'&&method==='POST'){await rate(config,request,'auth-logout',60);const raw=await body(request);return json(200,await sessionService(config,{hash,seal,unseal,randomToken,failure}).logout(request,String(raw.refreshToken||'')));}
   if(route==='/v1/auth/verify'&&method==='POST'){
     await rate(config,request,'verify',20,600000);const raw=await body(request),registrationId=String(raw.registrationId||''),now=Date.now();
     if(!/^\d{6}$/.test(String(raw.code||'')))throw failure(400,'Digite os 6 dígitos recebidos.');
@@ -257,6 +272,7 @@ async function api(request,env,url,config){
     const existing=await db.prepare('SELECT * FROM users WHERE callsign=? OR dmr_id=? LIMIT 1').bind(row.callsign,row.dmr_id).first();
     if(existing&&(existing.phone_hash!==row.phone_hash||existing.callsign!==row.callsign||existing.dmr_id!==row.dmr_id))throw failure(409,'O perfil já está vinculado a outra conta.');
     const token=randomToken(),sessionHash=await hash(config,token),id=existing?.id||crypto.randomUUID();
+    const modern=raw.sessionProtocol===2,device=modern?await sessionService(config,{hash,seal,unseal,randomToken,failure}).prepare(id,token):null;
     let result;try{result=await db.batch([
       db.prepare(`INSERT INTO users(id,callsign,dmr_id,phone_cipher,phone_hash,share_phone,created_at,verified_at,whatsapp_verified,verification_method)
         SELECT ?,r.callsign,r.dmr_id,r.phone_cipher,r.phone_hash,r.share_phone,?,?,1,c.mode FROM registrations r JOIN codes c ON c.registration_id=r.id
@@ -264,22 +280,33 @@ async function api(request,env,url,config){
         ON CONFLICT(callsign) DO UPDATE SET share_phone=excluded.share_phone,whatsapp_verified=1,verified_at=excluded.verified_at,verification_method=excluded.verification_method
         WHERE users.dmr_id=excluded.dmr_id AND users.phone_hash=excluded.phone_hash RETURNING *`).bind(id,now,now,row.id,codeRow.hash,now),
       db.prepare(`INSERT INTO sessions(hash,user_id,expires_at) SELECT ?,u.id,? FROM users u JOIN registrations r ON u.callsign=r.callsign AND u.dmr_id=r.dmr_id AND u.phone_hash=r.phone_hash
-        JOIN codes c ON c.registration_id=r.id WHERE r.id=? AND c.hash=? AND c.expires_at>? AND c.attempts<=5 AND (c.mode<>'reverse' OR c.reverse_confirmed_at IS NOT NULL)`).bind(sessionHash,now+30*DAY,row.id,codeRow.hash,now),
+        JOIN codes c ON c.registration_id=r.id WHERE r.id=? AND c.hash=? AND c.expires_at>? AND c.attempts<=5 AND (c.mode<>'reverse' OR c.reverse_confirmed_at IS NOT NULL)`).bind(sessionHash,(modern?device.value.accessExpiresAt:now+30*DAY),row.id,codeRow.hash,now),
       db.prepare('UPDATE registrations SET whatsapp_verified=1,verified_at=? WHERE id=? AND EXISTS(SELECT 1 FROM sessions WHERE hash=?)').bind(now,row.id,sessionHash),
       db.prepare('DELETE FROM codes WHERE registration_id=? AND hash=?').bind(row.id,codeRow.hash),
-      db.prepare('DELETE FROM whatsapp_outbox WHERE registration_id=? AND code_hash=?').bind(row.id,codeRow.hash)
+      db.prepare('DELETE FROM whatsapp_outbox WHERE registration_id=? AND code_hash=?').bind(row.id,codeRow.hash),
+      ...(device?sessionService(config,{hash,seal,unseal,randomToken,failure}).issueStatements(device,sessionHash):[])
     ]);}catch(error){if(String(error.message).includes('UNIQUE constraint'))throw failure(409,'O perfil já está vinculado a outra conta.');throw error;}
     if(!result[0].results.length||!result[1].meta.changes)throw failure(401,'O código já foi utilizado. Solicite outro.');
     await releaseNotices.activateConsent(config,row.id,result[0].results[0].id);
-    const available=Boolean(config.downloads[row.platform]);return json(200,{token,user:await publicUser(config,result[0].results[0],true),expiresInDays:30,downloadAvailable:available,downloadUrl:available?'/download/'+await downloadToken(config,row.id,row.platform):null});
+    const available=Boolean(config.downloads[row.platform]);return json(200,{token,...(device?device.value:{}),user:await publicUser(config,result[0].results[0],true),expiresInSeconds:modern?3600:30*86400,...(!modern?{expiresInDays:30}:{}),downloadAvailable:available,downloadUrl:available?'/download/'+await downloadToken(config,row.id,row.platform):null});
   }
-  const me=await currentUser(config,request);await rate(config,request,'authenticated',240);
+  if(request.headers.get('X-ZapDMR-Platform')==='android'||/Android.*ZapDMR\//.test(request.headers.get('User-Agent')||'')){const release=await releases.latest(),code=Number(request.headers.get('X-ZapDMR-Version-Code')||0);if(release&&release.minSupportedCode>0&&(!Number.isSafeInteger(code)||code<release.minSupportedCode))throw failure(426,release.requiredReason||'Atualize o ZapDMR para usar esta versão do servidor.',{code:'APP_UPDATE_REQUIRED'});}
+  const me=await currentUser(config,request);await rate(config,request,'authenticated',240,60000,me.id);
+  if(route==='/v1/auth/session'&&method==='POST'){await body(request);return json(200,{...await sessionService(config,{hash,seal,unseal,randomToken,failure}).bootstrap(me,(request.headers.get('Authorization')||'').replace(/^Bearer /,'')),user:await publicUser(config,me,true)});}
+  const push=chatPush(config,env,{hash,seal,unseal,failure});
+  if(route==='/v1/push/status'&&method==='GET')return json(200,{configured:pushConfigured(env)});
+  if(route==='/v1/push/devices'&&method==='POST')return json(200,await push.register(me,request,await body(request)));
+  if(route==='/v1/push/devices'&&method==='DELETE')return json(200,await push.unregister(me,request));
+  const inbox=chatInbox(config,{messageSelect,publicMessage,failure});
+  if(route==='/v1/inbox'&&method==='GET')return json(200,await inbox.inbox(me));
+  if(route==='/v1/conversations'&&method==='GET')return json(200,await inbox.conversations(me,cursor(url.searchParams.get('before'))));
+  if(route==='/v1/messages/delivered'&&method==='POST'){const raw=await body(request);return json(200,await inbox.delivered(me,raw.ids));}
   if(route==='/v1/me'&&method==='GET')return json(200,{user:await publicUser(config,me,true)});
-  if(route==='/v1/me'&&method==='PATCH'){const raw=await body(request),updated=await db.prepare('UPDATE users SET share_phone=? WHERE id=? RETURNING *').bind(typeof raw.sharePhone==='boolean'?(raw.sharePhone?1:0):me.share_phone,me.id).first();await releaseNotices.setPreference(config,me.id,raw.updateNotifications);return json(200,{user:await publicUser(config,updated,true)});}
+  if(route==='/v1/me'&&method==='PATCH'){const raw=await body(request),updated=await db.prepare('UPDATE users SET share_phone=?,display_name=? WHERE id=? RETURNING *').bind(typeof raw.sharePhone==='boolean'?(raw.sharePhone?1:0):me.share_phone,typeof raw.displayName==='string'?raw.displayName.trim().slice(0,80):me.display_name||'',me.id).first();await releaseNotices.setPreference(config,me.id,raw.updateNotifications);return json(200,{user:await publicUser(config,updated,true)});}
   if(route==='/v1/me'&&method==='DELETE'){await db.batch([db.prepare('DELETE FROM registrations WHERE phone_hash=? AND callsign=?').bind(me.phone_hash,me.callsign),db.prepare('DELETE FROM users WHERE id=?').bind(me.id)]);return json(200,{deleted:true});}
   if(route==='/v1/directory'&&method==='GET'){
-    const query=String(url.searchParams.get('query')||'').trim().toUpperCase();if(!/^[A-Z0-9]{3,8}$/.test(query))throw failure(400,'Pesquise um indicativo ou Radio ID exato.');
-    await rate(config,request,'directory',30);const found=await db.prepare('SELECT u.* FROM users u WHERE (callsign=? OR dmr_id=?) AND NOT EXISTS(SELECT 1 FROM blocks b WHERE (b.owner=? AND b.peer=u.id) OR (b.owner=u.id AND b.peer=?)) LIMIT 1').bind(query,query,me.id,me.id).first();return json(200,{user:found?await publicUser(config,found):null});
+    const query=String(url.searchParams.get('query')||'').trim().toUpperCase();if(!/^[A-Z0-9]{3,8}$/.test(query)&&!/^[A-F0-9-]{36}$/.test(query))throw failure(400,'Pesquise um indicativo ou Radio ID exato.');
+    await rate(config,request,'directory',30);const found=await db.prepare('SELECT u.* FROM users u WHERE whatsapp_verified=1 AND (callsign=? OR dmr_id=? OR id=?) AND NOT EXISTS(SELECT 1 FROM blocks b WHERE (b.owner=? AND b.peer=u.id) OR (b.owner=u.id AND b.peer=?)) LIMIT 1').bind(query,query,query.toLowerCase(),me.id,me.id).first();return json(200,{user:found?await publicUser(config,found):null});
   }
   if(route==='/v1/blocks'&&method==='POST'){
     const raw=await body(request),peer=String(raw.peer||'');if(peer===me.id||!await db.prepare('SELECT id FROM users WHERE id=?').bind(peer).first())throw failure(404,'Contacto não encontrado.');
@@ -294,6 +321,7 @@ async function api(request,env,url,config){
     if(attachmentId&&!await db.prepare('SELECT id FROM attachments a WHERE id=? AND sender=? AND recipient=? AND ready=1 AND NOT EXISTS(SELECT 1 FROM message_attachments ma WHERE ma.attachment_id=a.id)').bind(attachmentId,me.id,to).first())throw failure(400,'O anexo não está disponível para esta conversa.');
     const statements=[db.prepare('INSERT INTO messages(id,sender,recipient,body_cipher,at,read_at) VALUES(?,?,?,?,(SELECT MAX(?,COALESCE(MAX(at),0)+1) FROM messages),NULL) ON CONFLICT(id) DO NOTHING').bind(id,me.id,to,await seal(config,text),Date.now())];
     if(attachmentId)statements.push(db.prepare('INSERT INTO message_attachments(message_id,attachment_id) VALUES(?,?) ON CONFLICT(message_id) DO NOTHING').bind(id,attachmentId));
+    if(pushConfigured(env))statements.push(push.enqueue(id,to));
     await db.batch(statements);const row=await db.prepare(messageSelect+' WHERE m.id=?').bind(id).first();return json(201,await publicMessage(config,row,me.id));
   }
   if(route==='/v1/messages'&&method==='GET'){
@@ -313,9 +341,9 @@ async function api(request,env,url,config){
     const raw=await body(request),peer=String(raw.peer||'');if(!await pairAvailable(config,me.id,peer))throw failure(404,'Este contacto não está disponível.');
     // Materialized CTEs freeze the old maximum and pending rows for this atomic
     // update, assigning a distinct increasing read_at to every receipt.
-    const changed=await db.prepare(`WITH base AS MATERIALIZED (SELECT MAX(?,COALESCE(MAX(read_at),0)+1) AS first_at FROM messages),
+    const changed=await db.prepare(`WITH base AS MATERIALIZED (SELECT MAX(?,COALESCE(MAX(MAX(COALESCE(read_at,0),COALESCE(delivered_at,0))),0)+1) AS first_at FROM messages),
       pending AS MATERIALIZED (SELECT id,ROW_NUMBER() OVER(ORDER BY at,id)-1 AS ordinal FROM messages WHERE recipient=? AND sender=? AND read_at IS NULL AND at<=?)
-      UPDATE messages SET read_at=(SELECT first_at FROM base)+(SELECT ordinal FROM pending WHERE pending.id=messages.id) WHERE id IN(SELECT id FROM pending)`).bind(Date.now(),me.id,peer,raw.through==null?Number.MAX_SAFE_INTEGER:cursor(raw.through)).run();
+      UPDATE messages SET delivered_at=COALESCE(delivered_at,(SELECT first_at FROM base)+(SELECT ordinal FROM pending WHERE pending.id=messages.id)),read_at=(SELECT first_at FROM base)+(SELECT ordinal FROM pending WHERE pending.id=messages.id) WHERE id IN(SELECT id FROM pending)`).bind(Date.now(),me.id,peer,raw.through==null?Number.MAX_SAFE_INTEGER:cursor(raw.through)).run();
     return json(200,{ok:true,changed:Number(changed.meta.changes||0)});
   }
   if(route==='/v1/attachments'&&method==='POST')return attachments(config,{seal,unseal,pairAvailable,rate,json}).upload(request,url,me);
@@ -350,6 +378,7 @@ export async function cleanup(env){
     ...releaseNotices.cleanupStatements(config,now),
     config.db.prepare('DELETE FROM rate_limits WHERE expires_at<?').bind(now),
     config.db.prepare('DELETE FROM sessions WHERE expires_at<?').bind(now),
+    config.db.prepare('DELETE FROM auth_devices WHERE refresh_expires_at<? AND NOT EXISTS(SELECT 1 FROM session_devices d JOIN sessions s ON s.hash=d.session_hash WHERE d.device_id=auth_devices.id AND s.expires_at>?)').bind(now,now),
     config.db.prepare('DELETE FROM codes WHERE expires_at<?').bind(now),
     config.db.prepare('DELETE FROM whatsapp_outbox WHERE expires_at<?').bind(now),
     config.db.prepare('DELETE FROM attachments WHERE created_at<? AND NOT EXISTS(SELECT 1 FROM message_attachments ma WHERE ma.attachment_id=attachments.id)').bind(now-3600000),
@@ -358,3 +387,5 @@ export async function cleanup(env){
 }
 
 export async function discoverReleaseNotifications(env){return releaseNotices.discoverLatestRelease(await configuration(env));}
+
+export async function dispatchChatPush(env){return chatPush(await configuration(env),env,{hash,seal,unseal,failure}).drain();}

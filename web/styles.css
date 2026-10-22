@@ -437,3 +437,7 @@ body>.toast.show{transform:translate(-50%,0)}
 .radio-actions-dialog p{font-size:13px;line-height:1.5;color:var(--muted)}.radio-actions-dialog .button{display:block;width:100%;margin-top:10px;min-height:44px;white-space:normal}
 .participant-action{padding:4px 0;border:0;background:transparent;color:var(--green-text);font:inherit;font-weight:700;text-decoration:underline;text-underline-offset:3px;min-height:32px}
 @media(max-width:480px){.top-actions{gap:5px}.top-actions .radio-power{width:34px;height:34px}.topbar .brand{min-width:0}.topbar .theme select{max-width:80px}}
+
+.chat-conversations{display:flex;gap:6px;overflow-x:auto;padding:8px 0;flex-shrink:0}.chat-conversations button{white-space:nowrap;font-size:13px;padding:8px 10px}.chat-inbox-notice{position:fixed;z-index:10000;bottom:90px;left:12px;right:12px;margin:auto;max-width:480px;padding:14px;border-radius:12px;border:1px solid #20ce77;background:#123a2b;color:#fff;font:inherit;box-shadow:0 4px 20px #0008}.chat-inbox-notice[hidden]{display:none}
+
+.app-update-dialog pre{white-space:pre-wrap;font:inherit;max-height:35vh;overflow:auto}.app-update-dialog strong{display:block;margin:10px 0}
