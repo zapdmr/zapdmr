@@ -33,6 +33,26 @@ export class BrandMeisterGateway extends EventEmitter {
   private terminal?: OpenTerminal;
   private protocol: 'hbp' | 'odtp' = 'hbp';
   private rxTarget = 724;
+  private xlx = false;
+  private userUrl = '';
+  private hbpOptions = '';
+  private rxUntil = 0;
+  private rxStream = 0;
+  private rxGuardTimer?: NodeJS.Timeout;
+  private xlxAudioReceived = false;
+  private receiveCallType: DmrCallType = 'group';
+  private rxProtectionMs = 500;
+  private rxBusy() { return Date.now() < this.rxUntil; }
+  private observeReception(packet: Buffer) {
+    if(this.state!=='connected'||packet.readUIntBE(5,3)===this.radioId||!this.isSelectedVoicePacket(packet,this.rxTarget,this.receiveCallType))return;
+    const kind=packet[15]&0x3f,stream=packet.readUInt32BE(16);
+    if(kind===0x22){if(stream===this.rxStream)this.rxUntil=Date.now()+this.rxProtectionMs;}
+    else if(kind===0x21||(packet[15]&0x20)===0){this.rxStream=stream;this.rxUntil=Date.now()+1200+this.rxProtectionMs;}else return;
+    if(this.xlx&&(packet[15]&0x20)===0)this.xlxAudioReceived=true;
+    if(this.rxGuardTimer)clearTimeout(this.rxGuardTimer);
+    this.rxGuardTimer=setTimeout(()=>this.emit('status',this.status()),Math.max(1,this.rxUntil-Date.now()+5));
+    this.emit('status',this.status());
+  }
   private state: GatewayState = 'disconnected';
   private stateMessage = 'Desligado.';
   private lastErrorCode?: string;
@@ -82,10 +102,12 @@ export class BrandMeisterGateway extends EventEmitter {
     return {
       state: this.state,
       protocol: this.protocol,
-      reception: this.terminal?.snapshot() || {protocol:this.protocol,supported:this.protocol==='odtp',state:this.state==='connected'?'unsupported':this.state,targetTalkgroupId:this.rxTarget,message:this.state==='connected'?'Homebrew/HBP não oferece inscrição de TG sem PTT. Use ODTP num master compatível.':this.stateMessage},
+      xlxModule: this.xlx ? 'C' : undefined,
+      rxBusy: this.rxBusy(),
+      reception: this.terminal?.snapshot() || (this.xlx ? {protocol:'hbp',supported:true,state:this.state==='connected'?(this.xlxAudioReceived?'receiving':'awaiting-audio'):this.state,targetTalkgroupId:4003,message:this.state==='connected'?(this.xlxAudioReceived?'XLX026 · Módulo C · áudio recebido nesta sessão.':'XLX026 · login aceito; módulo C solicitado no RPTC. Aguardando áudio para confirmar recepção.'):this.stateMessage} : null) || {protocol:this.protocol,supported:this.protocol==='odtp',state:this.state==='connected'?'unsupported':this.state,targetTalkgroupId:this.rxTarget,message:this.state==='connected'?'Homebrew/HBP não oferece inscrição de TG sem PTT. Use ODTP num master compatível.':this.stateMessage},
       errorCode: this.lastErrorCode,
       connected: this.state === 'connected',
-      pttReady: this.state === 'connected' && this.audioReady,
+      pttReady: this.state === 'connected' && this.audioReady && !this.rxBusy(),
       dmrdRelayReady: this.state === 'connected',
       voiceCodecAvailable: this.audioReady,
       pttArmed: this.txArmed,
@@ -127,7 +149,7 @@ export class BrandMeisterGateway extends EventEmitter {
     const destination = packet.readUIntBE(8, 3);
     if (callType === 'private')
       return individual && destination === this.radioId && packet.readUIntBE(5, 3) === targetId;
-    return !individual && destination === targetId;
+    return !individual && (this.xlx ? (packet[15]&0x80)!==0 && targetId===4003 : destination === targetId);
   }
 
   talkgroupActivitySnapshot(): Record<string, {
@@ -241,9 +263,17 @@ export class BrandMeisterGateway extends EventEmitter {
   }
 
   selectReception(id:number,callType:DmrCallType='group') {
-    this.rxTarget=id;
+    this.rxTarget=this.xlx?4003:id;this.receiveCallType=callType;this.rxUntil=0;this.xlxAudioReceived=false;
     this.terminal?.select(id,callType==='private');
     this.emit('status',this.status());
+  }
+
+  configureDisconnectedProfile(settings: AppSettings): void {
+    if(this.state!=='disconnected'||this.socket)return;
+    this.xlx=settings.serverType==='other'&&settings.xlxModule==='C';
+    this.protocol=this.xlx?'hbp':settings.radioProtocol==='odtp'?'odtp':'hbp';
+    this.rxTarget=this.xlx?4003:settings.selectedTalkgroupId;
+    this.receiveCallType='group';this.rxUntil=0;this.xlxAudioReceived=false;
   }
 
   async connect(settings: AppSettings, password?: string): Promise<ConnectResult> {
@@ -254,6 +284,7 @@ export class BrandMeisterGateway extends EventEmitter {
     const callsign = settings.callsign.trim().toUpperCase();
     const dmrId = settings.dmrId.trim();
     const essid = settings.essid.trim();
+    const xlx = settings.serverType==='other' && settings.xlxModule==='C';
     const rxFrequencyHz = settings.rxFrequencyHz?.trim() || DEFAULT_HOTSPOT_FREQUENCY_HZ;
     const txFrequencyHz = settings.txFrequencyHz?.trim() || DEFAULT_HOTSPOT_FREQUENCY_HZ;
     const masterHost = settings.masterHost.trim();
@@ -261,7 +292,7 @@ export class BrandMeisterGateway extends EventEmitter {
       return this.fail('INVALID_CALLSIGN', 'Informe um indicativo válido com até 8 caracteres.');
     if (!/^\d{7}$/.test(dmrId))
       return this.fail('INVALID_DMR_ID', 'O Radio ID base deve ter 7 algarismos; o ESSID é informado à parte.');
-    if (!/^\d{2}$/.test(essid))
+    if (!(xlx ? /^(?:\d{2})?$/.test(essid) : /^\d{2}$/.test(essid)))
       return this.fail('INVALID_ESSID', 'O ESSID deve ter dois algarismos, de 00 a 99.');
     if (!/^\d{9}$/.test(rxFrequencyHz) || rxFrequencyHz === '000000000' ||
         !/^\d{9}$/.test(txFrequencyHz) || txFrequencyHz === '000000000')
@@ -277,8 +308,10 @@ export class BrandMeisterGateway extends EventEmitter {
       return this.fail('INVALID_HOTSPOT_ID', 'O ID composto do hotspot não é válido.');
 
     await this.disconnect(false);
-    this.protocol=settings.radioProtocol==='odtp'?'odtp':'hbp';
-    this.rxTarget=settings.selectedTalkgroupId;
+    this.xlx=xlx;this.userUrl=xlx?'C':settings.userUrl||'';this.hbpOptions=settings.hbpOptions||'';
+    this.rxProtectionMs=Math.max(0,Math.min(3000,Number((settings.operation?.controls as any)?.rxProtectionMs)||500));
+    this.protocol=xlx?'hbp':settings.radioProtocol==='odtp'?'odtp':'hbp';
+    this.rxTarget=xlx?4003:settings.selectedTalkgroupId;this.receiveCallType='group';
     this.callsign = callsign;
     this.radioId = Number(dmrId);
     this.hotspotId = id;
@@ -321,10 +354,10 @@ export class BrandMeisterGateway extends EventEmitter {
       terminal.on('voice',(call:{source:number;destination:number;individual:boolean;streamId:number;words:Buffer[]})=>{
         const frame=Buffer.alloc(55);frame.write('DMRD');frame.writeUIntBE(call.source,5,3);frame.writeUIntBE(call.destination,8,3);frame[15]=0x10|(call.individual?0x40:0);frame.writeUInt32BE(call.streamId,16);
         buildVoiceBurst(call.words,true,1,{destinationId:call.destination,sourceId:call.source,callType:call.individual?'private':'group',sequence:0}).copy(frame,20);
-        if(!call.individual)this.noteTalkgroupActivity(call.destination);this.emit('frame',frame);
+        this.observeReception(frame);if(!call.individual)this.noteTalkgroupActivity(call.destination);this.emit('frame',frame);
       });
     }
-    socket.on('error', (error) => this.failSession('UDP_ERROR', `Erro no socket UDP: ${error.message}`));
+    socket.on('error', (error) => {if(this.socket===socket)this.failSession('UDP_ERROR', `Erro no socket UDP: ${error.message}`);});
 
     return new Promise<ConnectResult>((resolve) => {
       this.pendingConnect = {
@@ -350,7 +383,8 @@ export class BrandMeisterGateway extends EventEmitter {
   }
 
   async disconnect(announce = true): Promise<ConnectResult> {
-    this.clearTimers();
+    this.clearTimers();this.rxUntil=0;this.xlxAudioReceived=false;this.talkgroupActivity.clear();
+    if(this.rxGuardTimer)clearTimeout(this.rxGuardTimer);
     if (this.pendingConnect) {
       const pending = this.pendingConnect;
       this.pendingConnect = undefined;
@@ -363,7 +397,11 @@ export class BrandMeisterGateway extends EventEmitter {
       const close = Buffer.alloc(9);
       close.write('RPTCL', 0, 'ascii');
       close.writeUInt32BE(this.hotspotId, 5);
-      try { await this.send(close); } catch { /* socket may already be gone */ }
+      try {
+        await this.send(close);
+        // Some XLX forks recognize the legacy 13-byte close envelope.
+        if(this.xlx)await this.send(Buffer.concat([close,Buffer.alloc(4)]));
+      } catch { /* socket may already be gone */ }
     }
     this.socket = undefined;
     this.txArmed = false;
@@ -385,7 +423,7 @@ export class BrandMeisterGateway extends EventEmitter {
     this.masterHost = undefined;
     this.lastErrorCode = undefined;
     if (socket) {
-      try { socket.close(); } catch { /* already closed */ }
+      await new Promise<void>(resolve=>{try {socket.close(()=>resolve());} catch {resolve();}});
     }
     this.setState('disconnected', announce ? 'Desligado do master BrandMeister.' : 'Preparando nova sessão.');
     return { accepted: true, code: 'DISCONNECTED', message: this.stateMessage };
@@ -395,6 +433,8 @@ export class BrandMeisterGateway extends EventEmitter {
     if(active&&this.terminal&&['connecting','subscribing','authenticating','error','unsubscribed'].includes(this.terminal.snapshot().state))
       return {accepted:false,code:'ODTP_SUBSCRIPTION_PENDING',message:'Aguarde a resposta da inscrição ODTP antes de transmitir.'};
     if (active) {
+      if(this.rxBusy())return {accepted:false,code:'RX_BUSY',message:'RX OCUPADO — AGUARDE'};
+      if(this.xlx && (talkgroupId!==4003||slot!==2||callType!=='group'))return {accepted:false,code:'INVALID_XLX_TARGET',message:'XLX026 utiliza módulo C · TG 4003 · TS2.'};
       if (this.state !== 'connected')
         return { accepted: false, code: 'NOT_CONNECTED', message: 'Ligue primeiro ao master BrandMeister.' };
       if (this.txArmed)
@@ -419,7 +459,7 @@ export class BrandMeisterGateway extends EventEmitter {
       // The HBP RPTC config advertises slots='4' for simplex. Always emit
       // simplex DMRD with bit 7 clear (TS1), even if the selected catalogue
       // entry is labelled TS2.
-      this.txSlot = this.isSimplex() ? 1 : slot;
+      this.txSlot = this.xlx ? 2 : this.isSimplex() ? 1 : slot;
       this.streamId = randomBytes(4).readUInt32BE(0) || 1;
       this.sequence = 0;
       this.setState('connected', `PTT preparado para ${callType === 'private' ? 'ID' : 'TG'} ${talkgroupId}; aguardando áudio.`);
@@ -471,6 +511,7 @@ export class BrandMeisterGateway extends EventEmitter {
   }
 
   async sendTalkgroupBurst(talkgroupId: number, slot: 1 | 2, silenceCodewords: Buffer[]): Promise<ConnectResult> {
+    if(this.xlx)return {accepted:false,code:'XLX_PASSIVE_ONLY',message:'XLX não utiliza PTT automático nem TG 4000. Desconecte a sessão para sair.'};
     if(this.protocol==='odtp')return {accepted:false,code:'ODTP_NO_BURST',message:'ODTP usa inscrição/cancelamento, sem rajadas de ativação.'};
     if (this.state !== 'connected')
       return { accepted: false, code: 'NOT_CONNECTED', message: 'Ligue primeiro ao master BrandMeister.' };
@@ -495,7 +536,7 @@ export class BrandMeisterGateway extends EventEmitter {
     this.txSendQueue = Promise.resolve({ accepted: true, code: 'TX_IDLE', message: '' });
     this.txTalkgroupId = talkgroupId;
     this.txCallType = 'group';
-    this.txSlot = this.isSimplex() ? 1 : slot;
+    this.txSlot = this.xlx ? 2 : this.isSimplex() ? 1 : slot;
     this.streamId = randomBytes(4).readUInt32BE(0) || 1;
     this.sequence = 0;
     this.txVoiceSequence = 0;
@@ -584,6 +625,7 @@ export class BrandMeisterGateway extends EventEmitter {
 
   /** Relay a complete codec/framer-produced 55-byte DMRD or 71-byte trunking datagram. */
   async sendDmrFrame(encodedPacket: Buffer): Promise<ConnectResult> {
+    if(this.rxBusy() && (!this.txLcSent || (encodedPacket[15]&0x3f)!==0x22))return {accepted:false,code:'RX_BUSY',message:'RX OCUPADO — AGUARDE'};
     if(this.protocol==='odtp'&&!this.terminal)return {accepted:false,code:'NOT_CONNECTED',message:'Sessão ODTP encerrada.'};
     if (this.state !== 'connected' || !this.socket || this.radioId === undefined || this.hotspotId === undefined)
       return { accepted: false, code: 'NOT_CONNECTED', message: 'Não há sessão HBP ligada.' };
@@ -657,6 +699,7 @@ export class BrandMeisterGateway extends EventEmitter {
         this.send(this.makeConfigPacket()).catch((error) =>
           this.failSession('UDP_SEND_FAILED', `Falha ao enviar configuração HBP: ${(error as Error).message}`));
       } else if (this.state === 'waiting-config') {
+        if(this.hbpOptions){const id=Buffer.alloc(4);id.writeUInt32BE(this.hotspotId!);void this.send(Buffer.concat([Buffer.from('RPTO'),id,Buffer.from(this.hbpOptions,'ascii')])).catch(error=>this.failSession('UDP_SEND_FAILED',error.message));}
         this.finishConnect();
       }
       return;
@@ -665,15 +708,17 @@ export class BrandMeisterGateway extends EventEmitter {
       this.lastMasterSeen = Date.now();
       this.setState(this.state, this.txArmed
         ? `PTT preparado para a TG ${this.txTalkgroupId}; aguardando quadros DMRD.`
-        : 'Ligado ao master BrandMeister; PTT em espera.');
+        : this.xlx?'XLX026 · Módulo C solicitado; PTT em espera.':'Ligado ao master; PTT em espera.');
       return;
     }
     if (packet.length >= 5 && packet.toString('ascii', 0, 5) === 'MSTCL') {
       this.failSession('MASTER_CLOSED', 'O master encerrou a sessão HBP.');
       return;
     }
-    if (isDmrDataPacket(packet)) {
-      if ((packet[15] & 0x40) === 0) this.noteTalkgroupActivity(packet.readUIntBE(8, 3));
+    if (this.state==='connected' && isDmrDataPacket(packet)) {
+      if(this.xlx && ((packet[15]&0x80)===0 || (packet[15]&0x40)!==0))return;
+      this.observeReception(packet);
+      if ((packet[15] & 0x40) === 0) this.noteTalkgroupActivity(this.xlx?4003:packet.readUIntBE(8, 3));
       this.emit('frame', packet);
     }
   }
@@ -681,7 +726,7 @@ export class BrandMeisterGateway extends EventEmitter {
   private finishConnect() {
     this.clearConnectTimer();
     this.lastMasterSeen = Date.now();
-    this.setState('connected', 'Ligado ao master BrandMeister; PTT em espera.');
+    this.setState('connected', this.xlx?'Conectado ao XLX026 · módulo C solicitado; aguardando áudio.':'Ligado ao master; PTT em espera.');
     this.pingTimer = setInterval(() => {
       if (this.state !== 'connected') return;
       if (Date.now() - this.lastMasterSeen > PING_INTERVAL_MS * 3) {
@@ -690,7 +735,7 @@ export class BrandMeisterGateway extends EventEmitter {
       }
       this.send(this.makeIdPacket('RPTPING')).catch((error) =>
         this.failSession('UDP_SEND_FAILED', `Falha ao enviar keepalive HBP: ${(error as Error).message}`));
-    }, PING_INTERVAL_MS);
+    }, this.xlx?5000:PING_INTERVAL_MS);
     const pending = this.pendingConnect;
     this.pendingConnect = undefined;
     pending?.resolve({ accepted: true, code: 'CONNECTED', message: this.stateMessage });
@@ -725,8 +770,8 @@ export class BrandMeisterGateway extends EventEmitter {
     const fields = [
       this.fixed(this.callsign, 8), this.fixed(this.rxFrequencyHz, 9), this.fixed(this.txFrequencyHz, 9), '01', '01',
       this.latitude, this.longitude, '001', this.fixed(this.locationName, 20), this.fixed('ZapDMR virtual hotspot', 19),
-      this.rxFrequencyHz === this.txFrequencyHz ? '4' : '3', // Simplex / duplex slot mode.
-      this.fixed('', 124), this.fixed('20261016_ZapDMR', 40), this.fixed('MMDVM_ZapDMR', 40)
+      this.xlx ? '2' : this.rxFrequencyHz === this.txFrequencyHz ? '4' : '3', // Simplex / duplex slot mode.
+      this.fixed(this.userUrl, 124), this.fixed('20261016_ZapDMR', 40), this.fixed('MMDVM_ZapDMR', 40)
     ];
     const payload = Buffer.from(fields.join(''), 'ascii');
     const packet = Buffer.concat([Buffer.from('RPTC'), id, payload]);

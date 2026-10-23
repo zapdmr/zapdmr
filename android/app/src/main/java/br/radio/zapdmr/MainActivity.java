@@ -35,6 +35,9 @@ public class MainActivity extends BridgeActivity {
         if(!QuickExitState.open()){finishWhenRadioStops();return;}
         android.webkit.WebView webView=getBridge().getWebView();
         String agent=webView.getSettings().getUserAgentString();
-        if(!agent.contains("ZapDMR/"))webView.getSettings().setUserAgentString(agent+" ZapDMR/1.4.6");
+        if(!agent.contains("ZapDMR/")){
+            try{webView.getSettings().setUserAgentString(agent+" ZapDMR/"+getPackageManager().getPackageInfo(getPackageName(),0).versionName);}
+            catch(android.content.pm.PackageManager.NameNotFoundException ignored){ /* Preserve the platform user agent. */ }
+        }
     }
 }

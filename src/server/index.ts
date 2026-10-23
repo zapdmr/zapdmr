@@ -135,13 +135,16 @@ function cleanSettings(value: Partial<AppSettings>): AppSettings {
     txFrequencyHz: cleanFrequency(value.txFrequencyHz),
     masterHost: (typeof value.masterHost === 'string' ? value.masterHost.trim().slice(0, 180) : '') || (serverType === 'brandmeister' ? '7242.master.brandmeister.network' : ''),
     masterPort,
-    radioProtocol,
+    radioProtocol: value.xlxModule==='C'&&serverType==='other'?'hbp':radioProtocol,
     serverType,
+    xlxModule: value.xlxModule === 'C' && serverType === 'other' ? 'C' : undefined,
+    userUrl: typeof value.userUrl === 'string' ? value.userUrl.replace(/[^\x20-\x7e]/g,'').slice(0,124) : '',
+    hbpOptions: typeof value.hbpOptions === 'string' ? value.hbpOptions.replace(/[^\x20-\x7e]/g,'').slice(0,256) : '',
     staticTalkgroups: typeof value.staticTalkgroups === 'string' ? value.staticTalkgroups.replace(/[^\d,;\s]/g, '').slice(0, 500) : '',
     locationName: typeof value.locationName === 'string' ? value.locationName.trim().slice(0, 120) : '',
     latitude: cleanCoordinate(value.latitude, -90, 90),
     longitude: cleanCoordinate(value.longitude, -180, 180),
-    defaultSlot: value.defaultSlot === 2 ? 2 : 1,
+    defaultSlot: value.xlxModule==='C'&&serverType==='other'?2:value.defaultSlot === 2 ? 2 : 1,
     theme,
     autoConnectOnStartup: value.autoConnectOnStartup !== false,
     autoReconnect: value.autoReconnect !== false,
@@ -152,7 +155,7 @@ function cleanSettings(value: Partial<AppSettings>): AppSettings {
     totSoundAlert: value.totSoundAlert !== false,
     txGainPercent: integerSetting(value.txGainPercent, 100, 0, 260),
     rxVolumePercent: integerSetting(value.rxVolumePercent, 100, 0, 260),
-    selectedTalkgroupId: Number.isInteger(value.selectedTalkgroupId) ? Number(value.selectedTalkgroupId) : 724,
+    selectedTalkgroupId: value.xlxModule==='C'&&serverType==='other'?4003:Number.isInteger(value.selectedTalkgroupId) ? Number(value.selectedTalkgroupId) : 724,
     favorites: Array.isArray(value.favorites) ? [...new Set(value.favorites.filter(Number.isInteger))] as number[] : [724]
     ,console: value.console && typeof value.console === 'object' && !Array.isArray(value.console)
       ? (JSON.stringify(value.console).length <= 128000 ? JSON.parse(JSON.stringify(value.console)) : {}) : {},
@@ -474,11 +477,11 @@ export async function startServer(options: StartOptions = {}) {
     broadcast('audio-level', currentAudioLevel);
     audioLevelIdleTimer = setTimeout(clearAudioMeter, 350);
   };
-  lastHeard.on('activity', (activity) => gateway.noteGlobalTalkgroupActivity(activity));
+  lastHeard.on('activity', (activity) => {if(settings.serverType==='brandmeister')gateway.noteGlobalTalkgroupActivity(activity);});
   lastHeard.on('participant', (participant: {
     talkgroupId: number; sourceId?: string; callsign?: string; name?: string;
     location?: string; country?: string; at?: number; event?: string;
-  }) => rememberParticipant(participant));
+  }) => {if(settings.serverType==='brandmeister')rememberParticipant(participant);});
   lastHeard.on('status', () => broadcast('status', status()));
   const finishSilenceCodewordRequest = (error?: Error, codewords?: Buffer[]) => {
     const pending = silenceCodewordRequest;
@@ -528,12 +531,27 @@ export async function startServer(options: StartOptions = {}) {
       void attemptConnection(true);
     }, delayMs);
   };
+  let connectionEpoch=0;
+  const applyProfileRuntime=()=>{
+    gateway.configureDisconnectedProfile(settings);
+    serialPtt.configure(settings.operation);linkedSlot=settings.defaultSlot;
+    if(audioClient&&audioSidecar.state==='ready')try{audioClient.send(AudioSidecarMessage.setTxGain,audioPercentPayload(settings.txGainPercent));audioClient.send(AudioSidecarMessage.setRxVolume,audioPercentPayload(settings.rxVolumePercent));}catch{}
+  };
+  const clearProfileSession=async()=>{
+    ++connectionEpoch;connectionWanted=false;clearTotTimers();clearReconnect(true);
+    await gateway.disconnect();voiceTarget=null;rxTargetTalkgroupId=0;++linkRevision;
+    rxAcceptedFrames=0;rxIgnoredFrames=0;participants.clear();lastReceivedTalkgroupId=0;
+    clearAudioMeter();if(audioClient)try{audioClient.send(AudioSidecarMessage.clearRx);}catch{}
+    broadcast('participants',[]);
+  };
   const attemptConnection = async (automatic: boolean) => {
     if (shuttingDown || !connectionWanted) return { accepted: false, code: 'CANCELLED', message: 'Ligação cancelada.' };
     reconnecting = automatic;
     reconnectMessage = automatic ? 'Tentando restabelecer a sessão com o master…' : '';
     broadcast('status', status());
+    const epoch=connectionEpoch;
     const result = await gateway.connect(settings, hotspotPassword);
+    if(epoch!==connectionEpoch)return {accepted:false,code:'CANCELLED',message:'Perfil anterior encerrado.'};
     log(`${automatic?'Reconexão':'Ligação'} HBP: ${result.code}` ,result.accepted?'info':'error');
     if (result.accepted) {
       clearReconnect(true);
@@ -703,7 +721,7 @@ export async function startServer(options: StartOptions = {}) {
     broadcast('status', status());
   });
   gateway.on('frame', (packet: Buffer) => {
-    lastReceivedTalkgroupId = packet.readUIntBE(8, 3);
+    lastReceivedTalkgroupId = settings.xlxModule==='C'?4003:packet.readUIntBE(8, 3);
     if((packet[15]&0x20)!==0)console.log(`[RX DMRD] TG ${lastReceivedTalkgroupId}, origem ${packet.readUIntBE(5,3)}, flags ${packet[15]}.`);
     if((packet[15]&0x40)===0)rememberParticipant({ talkgroupId: lastReceivedTalkgroupId, sourceId: packet.readUIntBE(5, 3), at: Date.now(), event: 'DMRD' });
     const matchesTarget=gateway.isSelectedVoicePacket(packet,voiceTarget?.id||Number(rxTargetTalkgroupId||settings.selectedTalkgroupId),voiceTarget?.callType||'group');
@@ -935,6 +953,8 @@ export async function startServer(options: StartOptions = {}) {
   app.post('/api/voice-target',(req,res)=>{
     if(gateway.status().pttArmed||talkgroupBurstPending)return res.status(409).json({message:'Termine a transmissão ou a troca de TG.'});
     const id=Number(req.body?.destinationId),privateCall=req.body?.callType==='private';
+    if(profileMutation)return res.status(409).json({message:'Aguarde a troca de perfil.'});
+    if(settings.xlxModule==='C'&&privateCall)return res.status(409).json({message:'Este perfil utiliza chamada de grupo XLX026 · Módulo C.'});
     if(privateCall&&(!Number.isInteger(id)||id<1||id>0xffffff||id===Number(settings.dmrId)))return res.status(400).json({message:'Radio ID de destino inválido.'});
     voiceTarget=privateCall?{id,callType:'private'}:null;
     gateway.selectReception(privateCall?id:Number(settings.selectedTalkgroupId),privateCall?'private':'group');
@@ -946,6 +966,13 @@ export async function startServer(options: StartOptions = {}) {
     ...settings, profileId: activeProfileId, profileName: profiles.find((profile) => profile.id === activeProfileId)?.name ?? 'Perfil',
     passwordConfigured: Boolean(hotspotPassword), passwordStoreError
   }));
+  let profileMutation=false;
+  app.use((req,res,next)=>{
+    const mutating=req.method==='POST'&&(req.path==='/api/settings'||req.path==='/api/profiles'||/^\/api\/profiles\/[^/]+\/activate$/.test(req.path))||req.method==='DELETE'&&/^\/api\/profiles\/[^/]+$/.test(req.path);
+    if(profileMutation && (mutating||['/api/connect','/api/ptt','/api/link-talkgroup','/api/voice-target'].includes(req.path)))return res.status(409).json({error:'Aguarde a troca de perfil.',message:'Aguarde a troca de perfil.'});
+    if(mutating)profileMutation=true;
+    next();
+  });
   app.get('/api/profiles', async (_req, res) => res.json({ activeProfileId, profiles: await profileMetadata() }));
   app.post('/api/profiles', async (req, res, next) => {
     try {
@@ -954,7 +981,7 @@ export async function startServer(options: StartOptions = {}) {
       if (!name) return res.status(400).json({ error: 'Informe um nome para o perfil.' });
       const id = randomUUID().replace(/-/g, '').slice(0, 24);
       const profileSettings = cleanSettings(req.body?.settings && typeof req.body.settings === 'object' ? req.body.settings : settings);
-      const submitted = typeof req.body?.hotspotPassword === 'string' ? req.body.hotspotPassword : hotspotPassword ?? '';
+      const submitted = typeof req.body?.hotspotPassword === 'string' ? req.body.hotspotPassword : '';
       if (submitted && (submitted.length > 20 || /[^\x21-\x7e]/.test(submitted)))
         return res.status(400).json({ error: 'A Hotspot Security Password deve ter até 20 caracteres imprimíveis, sem espaços.' });
       if (submitted) {
@@ -962,17 +989,17 @@ export async function startServer(options: StartOptions = {}) {
         profilePasswordsConfigured.add(id);
       }
       connectionWanted = false; clearTotTimers(); clearReconnect(true);
-      if (gateway.status().state !== 'disconnected') await gateway.disconnect();
+      await clearProfileSession();
       profiles.push({ id, name, settings: profileSettings });
       activeProfileId = id;
-      settings = { ...profileSettings };
+      settings = { ...profileSettings };applyProfileRuntime();
       hotspotPassword = submitted || undefined;
       passwordStoreError = false;
       await fs.writeFile(settingsFile, JSON.stringify(settings, null, 2), { encoding: 'utf8', mode: 0o600 });
       await persistProfiles();
       broadcast('settings', { ...settings, profileId: activeProfileId, profileName: name, passwordConfigured: Boolean(hotspotPassword), passwordStoreError });
       return res.status(201).json({ activeProfileId, profiles: await profileMetadata(), settings: { ...settings, profileId: activeProfileId, profileName: name, passwordConfigured: Boolean(hotspotPassword), passwordStoreError } });
-    } catch (error) { return next(error); }
+    } catch (error) { return next(error); } finally {profileMutation=false;}
   });
   app.post('/api/profiles/:id/activate', async (req, res, next) => {
     try {
@@ -982,9 +1009,9 @@ export async function startServer(options: StartOptions = {}) {
       connectionWanted = false;
       clearTotTimers();
       clearReconnect(true);
-      if (gateway.status().state !== 'disconnected') await gateway.disconnect();
+      await clearProfileSession();
       activeProfileId = profile.id;
-      settings = { ...profile.settings };
+      settings = { ...profile.settings };applyProfileRuntime();
       passwordStoreError = false;
       try {
         hotspotPassword = await loadWindowsSecret(profileSecretFile(profile.id)) ??
@@ -996,7 +1023,7 @@ export async function startServer(options: StartOptions = {}) {
       broadcast('settings', { ...settings, profileId: activeProfileId, profileName: profile.name, passwordConfigured: Boolean(hotspotPassword), passwordStoreError });
       broadcast('status', status());
       return res.json({ activeProfileId, profiles: await profileMetadata(), settings: { ...settings, profileId: activeProfileId, profileName: profile.name, passwordConfigured: Boolean(hotspotPassword), passwordStoreError } });
-    } catch (error) { return next(error); }
+    } catch (error) { return next(error); } finally {profileMutation=false;}
   });
   app.delete('/api/profiles/:id', async (req, res, next) => {
     try {
@@ -1007,13 +1034,13 @@ export async function startServer(options: StartOptions = {}) {
       const deletingActive = profiles[index].id === activeProfileId;
       if (deletingActive) {
         connectionWanted = false; clearTotTimers(); clearReconnect(true);
-        if (gateway.status().state !== 'disconnected') await gateway.disconnect();
+        await clearProfileSession();
       }
       const [removed] = profiles.splice(index, 1);
       await fs.rm(profileSecretFile(removed.id), { force: true });
       profilePasswordsConfigured.delete(removed.id);
       if (deletingActive) {
-        const next = profiles[0]; activeProfileId = next.id; settings = { ...next.settings };
+        const next = profiles[0]; activeProfileId = next.id; settings = { ...next.settings };applyProfileRuntime();
         try { hotspotPassword = await loadWindowsSecret(profileSecretFile(next.id)) ?? (next.id === 'default' ? await loadWindowsSecret(passwordFile) : undefined); }
         catch { hotspotPassword = undefined; passwordStoreError = true; }
         await fs.writeFile(settingsFile, JSON.stringify(settings, null, 2), { encoding: 'utf8', mode: 0o600 });
@@ -1022,7 +1049,7 @@ export async function startServer(options: StartOptions = {}) {
       }
       await persistProfiles();
       return res.json({ activeProfileId, profiles: await profileMetadata() });
-    } catch (error) { return next(error); }
+    } catch (error) { return next(error); } finally {profileMutation=false;}
   });
   app.get('/api/talkgroups', async (_req, res, next) => {
     try {
@@ -1232,7 +1259,7 @@ export async function startServer(options: StartOptions = {}) {
         return res.status(409).json({ error: 'Desarme o PTT manualmente antes de trocar de TalkGroup.' });
       if (nextSettings.dmrId && !/^\d{7}$/.test(nextSettings.dmrId))
         return res.status(400).json({ error: 'O Radio ID base deve conter 7 algarismos.' });
-      if (!/^\d{2}$/.test(nextSettings.essid))
+      if (!(nextSettings.xlxModule==='C'?/^(?:\d{2})?$/.test(nextSettings.essid):/^\d{2}$/.test(nextSettings.essid)))
         return res.status(400).json({ error: 'O ESSID deve conter dois algarismos, de 00 a 99.' });
       if (nextSettings.masterHost && !/^[a-zA-Z0-9.-]+$/.test(nextSettings.masterHost))
         return res.status(400).json({ error: 'Informe apenas o nome DNS ou endereço do master.' });
@@ -1241,6 +1268,9 @@ export async function startServer(options: StartOptions = {}) {
       if ((typeof req.body?.latitude === 'string' && req.body.latitude.trim() && !nextSettings.latitude) ||
           (typeof req.body?.longitude === 'string' && req.body.longitude.trim() && !nextSettings.longitude))
         return res.status(400).json({ error: 'Latitude ou longitude fora dos limites permitidos.' });
+      const transportChanged=['callsign','dmrId','essid','masterHost','masterPort','serverType','radioProtocol','xlxModule','userUrl','hbpOptions','defaultSlot'].some(key=>(settings as any)[key] !== (nextSettings as any)[key]);
+      if(transportChanged&&gateway.status().pttArmed)return res.status(409).json({error:'Termine a transmissão antes de alterar o perfil.'});
+      if(transportChanged)await clearProfileSession();
       const submitted = typeof req.body?.hotspotPassword === 'string' ? req.body.hotspotPassword : '';
       if (submitted && (submitted.length > 20 || /[^\x21-\x7e]/.test(submitted)))
         return res.status(400).json({ error: 'A Hotspot Security Password deve ter até 20 caracteres imprimíveis, sem espaços.' });
@@ -1289,7 +1319,7 @@ export async function startServer(options: StartOptions = {}) {
       broadcast('settings', { ...settings, profileId: activeProfileId, profileName: activeProfile?.name ?? 'Perfil', passwordConfigured: Boolean(hotspotPassword), passwordStoreError });
       broadcast('status', status());
       return res.json({ ...settings, profileId: activeProfileId, profileName: activeProfile?.name ?? 'Perfil', passwordConfigured: Boolean(hotspotPassword), passwordStoreError });
-    } catch (error) { return next(error); }
+    } catch (error) { return next(error); } finally {profileMutation=false;}
   });
   app.post('/api/connect', async (_req, res) => {
     if(!/^\+[1-9]\d{7,14}$/.test(String(communityProfile.phone||'')))return res.status(409).json({accepted:false,message:'Complete o campo WhatsApp obrigatório no Perfil antes de ligar.'});
@@ -1474,7 +1504,7 @@ export async function startServer(options: StartOptions = {}) {
   if (!address || typeof address === 'string') throw new Error('Could not determine local server address.');
   if (settings.autoConnectOnStartup) {
     const profileReady = /^[A-Z0-9/ -]{1,8}$/i.test(settings.callsign) &&
-      /^\d{7}$/.test(settings.dmrId) && /^\d{2}$/.test(settings.essid) &&
+      /^\d{7}$/.test(settings.dmrId) && (settings.xlxModule==='C'?/^(?:\d{2})?$/.test(settings.essid):/^\d{2}$/.test(settings.essid)) &&
       /^[a-zA-Z0-9.-]{1,180}$/.test(settings.masterHost) && Boolean(hotspotPassword);
     if (!profileReady || !/^\+[1-9]\d{7,14}$/.test(String(communityProfile.phone||''))) {
       connectionWanted = false;

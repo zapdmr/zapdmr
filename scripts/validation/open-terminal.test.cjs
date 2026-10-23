@@ -36,6 +36,7 @@ const wait=async(fn,timeout=3000)=>{const end=Date.now()+timeout;while(!fn()){if
     voice(7244);voice(91);await delay(25);assert.equal(received.length,2);voice(72426);await wait(()=>received.length===3);
     assert.equal(sent.filter(p=>p.type===ODTP.subscribe).some(p=>p.payload.readUInt32LE(4)===4000),false);
     // F: only explicit PTT sends voice packets, using the existing codec/framer.
+    await delay(1750); // Local RX interlock expires before the explicit TX test.
     gateway.setAudioReady(true);assert.equal((await gateway.setPtt(true,72426,2)).accepted,true);
     for(let n=0;n<3;n++)assert.equal((await gateway.pushVoiceCodeword(Buffer.alloc(9,0x55))).accepted,true);
     await gateway.setPtt(false,72426);await wait(()=>sent.some(p=>p.type===ODTP.terminator));

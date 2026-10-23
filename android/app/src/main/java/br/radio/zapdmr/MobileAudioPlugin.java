@@ -202,6 +202,7 @@ public final class MobileAudioPlugin extends Plugin {
     }
 
     private static final Object CONFIG_LOCK=new Object();
+    private static final java.util.concurrent.atomic.AtomicBoolean profileChanging=new java.util.concurrent.atomic.AtomicBoolean();
     private JSONObject readConfig() throws Exception {
         String encrypted=getContext().getSharedPreferences(PREFS,Context.MODE_PRIVATE).getString(CONFIG_KEY,null);
         return encrypted==null?new JSONObject():new JSONObject(decrypt(encrypted));
@@ -210,13 +211,69 @@ public final class MobileAudioPlugin extends Plugin {
         if(!getContext().getSharedPreferences(PREFS,Context.MODE_PRIVATE).edit().putString(CONFIG_KEY,encrypt(value.toString())).commit())throw new java.io.IOException("Secure storage failed");
     }
     @PluginMethod public void saveRadioConfig(PluginCall call) {
+        if(profileChanging.get()){call.reject("Aguarde a troca de perfil.");return;}
         try { synchronized(CONFIG_LOCK) {
+            if(profileChanging.get())throw new java.io.IOException("Aguarde a troca de perfil.");
             JSONObject value=new JSONObject(call.getData().toString()),stored=readConfig();
             // Radio settings snapshots must not replace a newer community session.
             if(stored.has("community"))value.put("community",stored.getJSONObject("community"));
-            writeConfig(value);
+            ensureProfiles(stored);
+            value.put("profiles",stored.getJSONArray("profiles"));value.put("activeProfileId",stored.getString("activeProfileId"));
+            syncActiveProfile(value);writeConfig(value);
         } call.resolve(new JSObject().put("saved",true));
         }catch(Exception error){call.reject("Não foi possível guardar o perfil protegido.","SECURE_STORAGE_FAILED",error);}
+    }
+    private void ensureProfiles(JSONObject value) throws Exception {
+        if(value.optJSONArray("profiles")!=null&&value.getJSONArray("profiles").length()>0)return;
+        JSONObject setting=value.optJSONObject("settings");if(setting==null)setting=new JSONObject();
+        JSONObject profile=new JSONObject().put("id","default").put("name",setting.optString("profileName","BrandMeister")).put("settings",setting).put("hotspotPassword",value.optString("hotspotPassword",""));
+        value.put("profiles",new org.json.JSONArray().put(profile)).put("activeProfileId","default");
+    }
+    private void syncActiveProfile(JSONObject value) throws Exception {
+        org.json.JSONArray list=value.getJSONArray("profiles");
+        for(int i=0;i<list.length();i++){JSONObject p=list.getJSONObject(i);if(p.getString("id").equals(value.getString("activeProfileId"))){p.put("settings",value.optJSONObject("settings")).put("hotspotPassword",value.optString("hotspotPassword",""));JSONObject setting=value.optJSONObject("settings");if(setting!=null&&!setting.optString("profileName").isEmpty())p.put("name",setting.getString("profileName"));}}
+    }
+    private JSObject profileResponse(JSONObject value) throws Exception {
+        org.json.JSONArray metadata=new org.json.JSONArray(),list=value.getJSONArray("profiles");
+        for(int i=0;i<list.length();i++){JSONObject p=list.getJSONObject(i),setting=p.getJSONObject("settings");metadata.put(new JSONObject().put("id",p.getString("id")).put("name",p.getString("name")).put("callsign",setting.optString("callsign")).put("dmrId",setting.optString("dmrId")).put("passwordConfigured",!p.optString("hotspotPassword").isEmpty()));}
+        JSONObject active=new JSONObject(value.optJSONObject("settings")==null?"{}":value.getJSONObject("settings").toString());
+        active.put("profileId",value.getString("activeProfileId")).put("passwordConfigured",!value.optString("hotspotPassword").isEmpty());
+        return new JSObject().put("profiles",metadata).put("activeProfileId",value.getString("activeProfileId")).put("settings",active);
+    }
+    @PluginMethod public void radioProfiles(PluginCall call){
+        String action=call.getString("action","list");
+        if(!profileChanging.compareAndSet(false,true)){call.reject("Aguarde a troca de perfil.");return;}
+        new Thread(()->{try{
+            if(!"list".equals(action)){
+                if(RadioSessionService.profileBusy())throw new java.io.IOException("Termine a transmissão ou teste antes de trocar perfil.");
+                if(RadioSessionService.running){
+                    getContext().startService(new Intent(getContext(),RadioSessionService.class).setAction(RadioSessionService.ACTION_DISCONNECT));
+                    long until=android.os.SystemClock.elapsedRealtime()+6000;
+                    while(RadioSessionService.running&&android.os.SystemClock.elapsedRealtime()<until)Thread.sleep(40);
+                    if(RadioSessionService.running)throw new java.io.IOException("A sessão anterior ainda está encerrando; tente novamente.");
+                }
+            }
+            synchronized(CONFIG_LOCK){
+                JSONObject value=readConfig();ensureProfiles(value);org.json.JSONArray list=value.getJSONArray("profiles");String id=call.getString("id","");
+                if("create".equals(action)){
+                    String name=call.getString("name","").trim();if(name.isEmpty()||name.length()>40||list.length()>=50)throw new java.io.IOException("Informe nome de até 40 caracteres; limite de 50 perfis.");
+                    id=java.util.UUID.randomUUID().toString();JSONObject setting=call.getObject("settings",new JSObject());setting.put("profileName",name);
+                    list.put(new JSONObject().put("id",id).put("name",name).put("settings",setting).put("hotspotPassword",""));
+                }else if("delete".equals(action)){
+                    if(list.length()<=1)throw new java.io.IOException("Mantenha pelo menos um perfil.");
+                    boolean found=false;for(int i=0;i<list.length();i++)if(list.getJSONObject(i).getString("id").equals(id)){list.remove(i);found=true;break;}
+                    if(!found)throw new java.io.IOException("Perfil não encontrado.");
+                    id=id.equals(value.getString("activeProfileId"))?list.getJSONObject(0).getString("id"):value.getString("activeProfileId");
+                }else if(!"activate".equals(action)&&!"list".equals(action))throw new java.io.IOException("Operação inválida.");
+                if(!"list".equals(action)){
+                    JSONObject selected=null;for(int i=0;i<list.length();i++)if(list.getJSONObject(i).getString("id").equals(id))selected=list.getJSONObject(i);
+                    if(selected==null)throw new java.io.IOException("Perfil não encontrado.");
+                    JSONObject setting=selected.getJSONObject("settings");setting.put("profileName",selected.getString("name"));
+                    value.put("settings",setting).put("hotspotPassword",selected.optString("hotspotPassword","")).put("activeProfileId",id);
+                }
+                writeConfig(value);call.resolve(profileResponse(value));
+            }
+        }catch(Exception error){call.reject(error.getMessage(),"PROFILE_FAILED",error);}finally{profileChanging.set(false);}},"ZapDMR-Profiles").start();
     }
     @PluginMethod public void saveCommunityProfile(PluginCall call) {
         try { synchronized(CONFIG_LOCK) { JSONObject value=readConfig();value.put("community",call.getObject("community",new JSObject()));writeConfig(value); }
@@ -229,6 +286,8 @@ public final class MobileAudioPlugin extends Plugin {
     }
 
     @PluginMethod public void connectRadio(PluginCall call) {
+        if(profileChanging.get()){call.reject("Aguarde a troca de perfil.");return;}
+        if(RadioSessionService.profileBusy()){call.reject("Termine a transmissão ou teste antes de conectar outro perfil.");return;}
         if(QuickExitState.blocked()){call.reject("ZapDMR está saindo. Abra novamente para conectar.");return;}
         try {
             JSObject settings=call.getObject("settings",new JSObject());

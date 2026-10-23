@@ -11,6 +11,9 @@ export interface AppSettings {
   masterPort: number;
   serverType: ServerType;
   radioProtocol?: 'hbp' | 'odtp';
+  xlxModule?: 'C';
+  userUrl?: string;
+  hbpOptions?: string;
   staticTalkgroups: string;
   locationName: string;
   latitude: string;

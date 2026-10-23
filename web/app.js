@@ -98,6 +98,26 @@ function updatePasswordHint() {
       : 'Digite a Hotspot Security Password e guarde o perfil para habilitar a ligação automática.';
 }
 
+let changingProfile=false;
+async function profileApi(action,payload={}) {
+  if(changingProfile)return {ok:false,data:{error:'Aguarde a troca de perfil.'}};
+  if(action!=='list'&&(gatewayStatus.pttArmed||gatewayStatus.transmitting))return {ok:false,data:{error:'Termine a transmissão antes de trocar perfil.'}};
+  changingProfile=true;
+  try{
+    if(action!=='list'){stopTalkgroupScan();privateContact=null;++selectionRevision;}
+    let result;
+    if(mobileAudio?.isAndroid?.()){
+      const data=await mobileAudio.radioProfiles({action,...payload});result={ok:true,data};
+      mobileSecureConfig=await mobileAudio.loadRadioConfig();passwordConfigured=!!mobileSecureConfig.hotspotPassword;
+    }else{
+      const path=action==='activate'?`/api/profiles/${encodeURIComponent(payload.id)}/activate`:action==='delete'?`/api/profiles/${encodeURIComponent(payload.id)}`:'/api/profiles';
+      result=await callApi(path,action==='list'?{}:{method:action==='delete'?'DELETE':'POST',body:JSON.stringify(payload)});
+    }
+    if(result.ok&&action!=='list'){gatewayStatus={connected:false,state:'disconnected'};talkgroupActivity={};participants=[];renderAudioMeter();masterLinkInitialized=false;}
+    return result;
+  }catch(error){return {ok:false,data:{error:error.message||'Não foi possível trocar perfil.'}};}
+  finally{changingProfile=false;}
+}
 function renderProfiles() {
   const select = $('#profileSelect');
   if (!select) return;
@@ -128,7 +148,10 @@ function applySettingsToForm(value) {
   $('#profileName').value = value.profileName || '';
   $('#callsign').value = settings.callsign;
   $('#dmrId').value = settings.dmrId;
-  $('#essid').value = settings.essid || '01';
+  $('#essid').value = settings.essid ?? '01';
+  $('#xlxMode').checked=settings.xlxModule==='C';
+  $('#userUrl').value=settings.userUrl||'';
+  $('#hbpOptions').value=settings.hbpOptions||'';
   $('#rxFrequencyHz').value = settings.rxFrequencyHz;
   $('#txFrequencyHz').value = settings.txFrequencyHz;
   $('#serverType').value = settings.serverType || 'brandmeister';
@@ -161,7 +184,10 @@ function normalizeFrequency(value) {
   return /^\d{9}$/.test(text) && text !== '000000000' ? text : defaultFrequencyHz;
 }
 
+const xlxGroup={id:4003,slot:2,name:'XLX026 · Módulo C · TS2',category:'Nacionais',kind:'group'};
+function isXlx(){return settings.serverType==='other'&&settings.xlxModule==='C';}
 function groupSelected() {
+  if(isXlx())return xlxGroup;
   return groups.find((group) => group.id === Number(settings.selectedTalkgroupId)) || groups[0];
 }
 
@@ -199,7 +225,7 @@ function matchesCatalogCategory(group, category) {
 }
 
 function renderQuickTalkgroups() {
-  const visible = groups.filter(group => quickCatalogScope === 'national' ? isNationalGroup(group)
+  const visible = settings.xlxModule==='C'?[xlxGroup]:groups.filter(group => quickCatalogScope === 'national' ? isNationalGroup(group)
     : quickCatalogScope === 'world' ? catalogCategory(group) === 'Mundiais' : true);
   const current = groups.find(group => group.id === Number(settings.selectedTalkgroupId));
   const outside = current && !visible.includes(current);
@@ -218,7 +244,7 @@ function renderQuickTalkgroups() {
 let quickPickerSnapshot = [], quickPickerSelectedId = 0, quickPickerScope = 'all';
 function openQuickTalkgroupPicker() {
   if ($('#quickTalkgroupDialog').open) return;
-  quickPickerSnapshot = groups.map(group => ({...group, category: catalogCategory(group), active: hasRecentActivity(group.id)}));
+  quickPickerSnapshot = (settings.xlxModule==='C'?[xlxGroup]:groups).map(group => ({...group, category: catalogCategory(group), active: hasRecentActivity(group.id)}));
   quickPickerSelectedId = Number(settings.selectedTalkgroupId);
   quickPickerScope = quickCatalogScope;
   $('#quickTalkgroupSearch').value = '';
@@ -315,11 +341,11 @@ function renderAudioMeter(data = {}) {
 function updateDisconnectControl() {
   const checkbox = $('#disconnectTalkgroup');
   const busy = disconnectInProgress || Boolean(gatewayStatus.talkgroupBurstActive) || Boolean(talkgroupBurstStatus.pending);
-  checkbox.disabled = (!apiAvailable && !mobileAudio?.isAndroid?.()) || !gatewayStatus.connected || Boolean(gatewayStatus.pttArmed) || busy;
+  checkbox.disabled = isXlx() || (!apiAvailable && !mobileAudio?.isAndroid?.()) || !gatewayStatus.connected || Boolean(gatewayStatus.pttArmed) || busy;
   checkbox.checked = disconnectInProgress;
   $('#disconnectTalkgroupText').innerHTML = disconnectInProgress
     ? '<b>A desconectar TG 4000…</b><small>Enviando áudio silencioso</small>'
-    : (gatewayStatus.protocol==='odtp'||settings.radioProtocol==='odtp'?'<b>Cancelar inscrição</b><small>ODTP · sem TG 4000</small>':'<b>Desconectar</b><small>TG 4000 · slot atual</small>');
+    : (isXlx()?'<b>XLX · Módulo C</b><small>Use Desligar para encerrar a sessão</small>':gatewayStatus.protocol==='odtp'||settings.radioProtocol==='odtp'?'<b>Cancelar inscrição</b><small>ODTP · sem TG 4000</small>':'<b>Desconectar</b><small>TG 4000 · slot atual</small>');
   $('#quickDisconnectLabel').classList.toggle('busy', disconnectInProgress);
 }
 
@@ -418,7 +444,7 @@ function renderFavorites() {
 }
 
 function renderGroups() {
-  const visible = filteredCatalogGroups();
+  const visible = isXlx()?[xlxGroup]:filteredCatalogGroups();
   const host = $('#groups');
   host.replaceChildren();
   for (const group of visible) {
@@ -540,10 +566,12 @@ async function persist(password = '') {
   if(window.ZapDMRCommunity)await window.ZapDMRCommunity.beforeSave();
   saveLocal();
   if (mobileAudio?.isAndroid?.()) {
+    if(changingProfile)throw new Error('Aguarde a troca de perfil.');
     const storedPassword = password || mobileSecureConfig.hotspotPassword || '';
     const community=window.ZapDMRCommunity?.privateConfig()||mobileSecureConfig.community||{};
     await mobileAudio.saveRadioConfig({ settings: { ...settings, profileName: $('#profileName').value.trim() }, customTalkgroups: groups.filter((group) => group.custom), hotspotPassword: storedPassword,community });
     mobileSecureConfig = { settings: { ...settings, profileName: $('#profileName').value.trim() }, hotspotPassword: storedPassword,community };
+    const list=await profileApi('list');if(list.ok){profiles=list.data.profiles;activeProfileId=list.data.activeProfileId;renderProfiles();}
     passwordConfigured = Boolean(storedPassword);
     passwordStoreError = false;
     await mobileAudio.configureOperation(settings.operation||{},settings.console||{},settings);
@@ -570,6 +598,9 @@ function readSettingsFromForm() {
   settings.masterHost = $('#master').value.trim();
   settings.masterPort = Number($('#masterPort').value);
   settings.radioProtocol=$('#radioProtocol').value==='odtp'?'odtp':'hbp';
+  settings.xlxModule=$('#xlxMode').checked&&settings.serverType==='other'?'C':undefined;
+  settings.userUrl=$('#userUrl').value.trim();settings.hbpOptions=$('#hbpOptions').value.trim();
+  if(settings.xlxModule){settings.radioProtocol='hbp';settings.defaultSlot=2;settings.selectedTalkgroupId=4003;}
   settings.staticTalkgroups = $('#staticTalkgroups').value.trim();
   settings.locationName = $('#locationName').value.trim();
   settings.latitude = $('#latitude').value.trim();
@@ -581,6 +612,7 @@ function readSettingsFromForm() {
   settings.totSoundAlert = $('#totSoundAlert').checked;
   settings.txGainPercent = Number($('#txGainPercent').value);
   settings.rxVolumePercent = Number($('#rxVolumePercent').value);
+  if(isXlx()){settings.defaultSlot=2;settings.radioProtocol='hbp';settings.selectedTalkgroupId=4003;}
   return settings;
 }
 
@@ -604,6 +636,7 @@ async function tuneSelectedTalkgroup(id){
 
 }
 async function selectGroup(id, options = {}) {
+  if(isXlx()&&Number(id)!==4003)return toast('Este perfil utiliza XLX026 · Módulo C · TG 4003 · TS2.');
   if ((gatewayStatus.pttArmed||gatewayStatus.transmitting)&&!gatewayStatus.talkgroupBurstActive)return toast('Termine o PTT antes de trocar TG.');
   if (!options.fromScan) stopTalkgroupScan();
   privateContact=null;
@@ -634,7 +667,7 @@ async function refreshTalkgroups() {
   const previousSelected = settings.selectedTalkgroupId;
   const previousFavorites = settings.favorites;
   settings.favorites = settings.favorites.filter((id) => groups.some((group) => group.id === id));
-  if (!groups.some((group) => group.id === Number(settings.selectedTalkgroupId))) {
+  if (!isXlx()&&!groups.some((group) => group.id === Number(settings.selectedTalkgroupId))) {
     settings.selectedTalkgroupId = groups.find((group) => group.id === 724)?.id ?? groups[0]?.id ?? 724;
   }
   if (previousSelected !== settings.selectedTalkgroupId || previousFavorites.length !== settings.favorites.length) {
@@ -796,7 +829,8 @@ function handleMobileRadioEvent(packet) {
   }
   if (packet?.event === 'activity') {
     const key = String(data.talkgroupId);
-    if (!groups.some((group) => group.id === Number(data.talkgroupId))) return;
+    if(isXlx()&&data.global)return;
+    if (!isXlx()&&!groups.some((group) => group.id === Number(data.talkgroupId))) return;
     const previous = talkgroupActivity[key] || {};
     talkgroupActivity[key] = { ...previous, ...data, active: data.global ? Boolean(data.active) : Boolean(previous.active) };
     refreshCatalogActivity();
@@ -866,7 +900,7 @@ async function init() {
   const androidAudioAvailable = Boolean(mobileAudio?.isAndroid?.());
   $('#mobileFirmwareSettings').hidden = !androidAudioAvailable;
   if (androidAudioAvailable) {
-    $('#aboutArchitecture').textContent = 'Android 1.4.6 · serviço ODTP/HBP e áudio locais, com vocoder ARM64/ARMv7. Firmware incluído, instalado automaticamente ao abrir o aplicativo.';
+    $('#aboutArchitecture').textContent = 'Android 1.4.7 · serviço ODTP/HBP e áudio locais, com vocoder ARM64/ARMv7. Firmware incluído, instalado automaticamente ao abrir o aplicativo.';
     try {
       await Promise.race([mobileAudio.initialize(handleMobileRadioEvent), new Promise((_, reject) => setTimeout(() => reject(new Error('O rádio ainda está a iniciar; o catálogo está disponível.')), 8000))]);
       mobileSecureConfig = await Promise.race([mobileAudio.loadRadioConfig(), new Promise((resolve) => setTimeout(() => resolve({}), 5000))]);
@@ -892,7 +926,7 @@ async function init() {
   try { settings = { ...defaults, ...JSON.parse(localStorage.getItem('zapdmr-settings') || '{}') }; } catch { /* Use defaults. */ }
   if (androidAudioAvailable && mobileSecureConfig.settings) settings = { ...settings, ...window.ZapDMRProtocol.normalize(mobileSecureConfig.settings) };
   if(androidAudioAvailable&&!localStorage.getItem('zapdmr-android-essid-separated')){
-    if(!settings.essid||['01','02'].includes(settings.essid))settings.essid='03';
+    if(!isXlx()&&(!settings.essid||['01','02'].includes(settings.essid)))settings.essid='03';
     await mobileAudio.saveRadioConfig({settings,customTalkgroups:mobileSecureConfig.customTalkgroups||[],hotspotPassword:mobileSecureConfig.hotspotPassword||''});
     localStorage.setItem('zapdmr-android-essid-separated','1');
   }
@@ -908,13 +942,14 @@ async function init() {
   $('#coreFirmwareUrl').value = localStorage.getItem('zapdmr-firmware-core-url') || '';
   if (androidAudioAvailable) applySettingsToForm(settings);
   else if (settingsResponse.ok) applySettingsToForm(settingsResponse.data);
+  if(androidAudioAvailable){const list=await profileApi('list');if(list.ok){profiles=list.data.profiles;activeProfileId=list.data.activeProfileId;renderProfiles();}}
   if (profilesResponse.ok) {
     profiles = profilesResponse.data.profiles || [];
     activeProfileId = profilesResponse.data.activeProfileId || activeProfileId;
     renderProfiles();
   }
   if (!settingsResponse.ok && !androidAudioAvailable) applySettingsToForm(settings);
-  if (!groups.some((group) => group.id === Number(settings.selectedTalkgroupId))) settings.selectedTalkgroupId = 724;
+  if (!isXlx()&&!groups.some((group) => group.id === Number(settings.selectedTalkgroupId))) settings.selectedTalkgroupId = 724;
   updateDmrDatabaseInfo(statusResponse.data?.dmrIdDatabase);
   updatePasswordHint();
   renderCategories();
@@ -945,7 +980,7 @@ async function reconnectMobileAfterOpen(){
   if(!resume&&!settings.autoConnectOnStartup)return;
   const missing=[];
   if(!settings.callsign)missing.push('indicativo');if(!settings.dmrId)missing.push('Radio ID');
-  if(!settings.essid)missing.push('ESSID');if(!settings.masterHost)missing.push('master');
+  if(!settings.essid&&settings.xlxModule!=='C')missing.push('ESSID');if(!settings.masterHost)missing.push('master');
   if(!mobileSecureConfig.hotspotPassword)missing.push('Hotspot Security Password');
   if(!window.ZapDMRCommunity?.isComplete())missing.push('WhatsApp do perfil');
   if(missing.length){setActiveScreen('settings');setActiveSettingsPane('profile');toast('Para reconectar, complete: '+missing.join(', ')+'.');return;}
@@ -1052,18 +1087,20 @@ $('#bmMasterSelect').onchange = (event) => {
 $('#profileSelect').onchange = async (event) => {
   const id = event.target.value;
   if (!id || id === activeProfileId) return;
-  const result = await callApi(`/api/profiles/${encodeURIComponent(id)}/activate`, { method: 'POST', body: '{}' });
+  const result = await profileApi('activate',{id});
   if (!result.ok) { renderProfiles(); return toast(result.data.error || 'Não foi possível trocar de perfil.'); }
   profiles = result.data.profiles || profiles;
   activeProfileId = result.data.activeProfileId;
   applySettingsToForm(result.data.settings);
   renderProfiles();
   renderGroups();
-  toast(`Perfil ${result.data.settings.profileName} carregado. A ligação ao master está desligada.`);
+  $('#password').value='';
+  if(passwordConfigured)$('#connect').click();
+  else toast('Perfil carregado. Informe e guarde a senha deste servidor.');
 };
 $('#addProfile').onclick = () => {
-  if (!apiAvailable) return toast('Inicie o servidor ZapDMR para guardar vários perfis.');
-  $('#newProfileName').value = '';
+  if (!apiAvailable&&!mobileAudio?.isAndroid?.()) return toast('Inicie o servidor ZapDMR para guardar vários perfis.');
+  $('#newProfileName').value = '';$('#newProfileKind').value='copy';
   $('#profileDialog').showModal();
   $('#newProfileName').focus();
 };
@@ -1071,8 +1108,10 @@ $('#cancelProfile').onclick = () => $('#profileDialog').close();
 $('#profileForm').onsubmit = async (event) => {
   event.preventDefault();
   const name = $('#newProfileName').value.trim();
-  const payload = { name, settings: readSettingsFromForm(), hotspotPassword: $('#password').value };
-  const result = await callApi('/api/profiles', { method: 'POST', body: JSON.stringify(payload) });
+  const base={...readSettingsFromForm()};
+  const preset=$('#newProfileKind').value==='xlx026';
+  const payload = { name, settings: preset?{...base,serverType:'other',radioProtocol:'hbp',xlxModule:'C',userUrl:'C',hbpOptions:'',masterHost:'xlx026.net',masterPort:62030,essid:'',defaultSlot:2,staticTalkgroups:'',selectedTalkgroupId:4003,favorites:[4003]}:{...base}, hotspotPassword: '' };
+  const result = await profileApi('create',payload);
   if (!result.ok) return toast(result.data.error || 'Não foi possível criar o perfil.');
   profiles = result.data.profiles || [];
   activeProfileId = result.data.activeProfileId;
@@ -1087,11 +1126,11 @@ $('#deleteProfile').onclick = async () => {
   if (profiles.length <= 1) return toast('Mantenha pelo menos um perfil no ZapDMR.');
   const selected = profiles.find((profile) => profile.id === activeProfileId);
   if (!selected || !window.confirm(`Eliminar o perfil “${selected.name}” deste dispositivo?`)) return;
-  const result = await callApi(`/api/profiles/${encodeURIComponent(activeProfileId)}`, { method: 'DELETE' });
+  const result = await profileApi('delete',{id:activeProfileId});
   if (!result.ok) return toast(result.data.error || 'Não foi possível eliminar o perfil.');
   profiles = result.data.profiles || [];
   activeProfileId = result.data.activeProfileId;
-  const loaded = await callApi('/api/settings');
+  const loaded = mobileAudio?.isAndroid?.()?{ok:true,data:result.data.settings}:await callApi('/api/settings');
   if (loaded.ok) applySettingsToForm(loaded.data);
   renderProfiles();
   renderGroups();
@@ -1255,7 +1294,7 @@ $('#settingsForm').onsubmit = async (event) => {
   const txFrequencyHz = $('#txFrequencyHz').value.trim();
   const password = $('#password').value;
   if (!/^\d{7}$/.test(settings.dmrId)) return toast('O Radio ID base deve ter 7 algarismos.');
-  if (!/^\d{2}$/.test(settings.essid)) return toast('O ESSID deve ter dois algarismos, de 00 a 99.');
+  if (!(isXlx()?/^(?:\d{2})?$/.test(settings.essid):/^\d{2}$/.test(settings.essid))) return toast('O ESSID deve ter dois algarismos, de 00 a 99.');
   if ((rxFrequencyHz && rxFrequencyHz !== '000000000' && !/^\d{9}$/.test(rxFrequencyHz)) ||
       (txFrequencyHz && txFrequencyHz !== '000000000' && !/^\d{9}$/.test(txFrequencyHz)))
     return toast('As frequências RX e TX devem conter nove algarismos em Hz.');
@@ -1323,3 +1362,6 @@ function renderReceptionState(){
   return view;
 }
 window.ZapDMRReception={render:renderReceptionState};
+
+$('#newProfileKind').onchange=()=>{if($('#newProfileKind').value==='xlx026')$('#newProfileName').value='XLX026';};
+$('#xlxMode').onchange=()=>{if($('#xlxMode').checked){$('#serverType').value='other';$('#radioProtocol').value='hbp';$('#defaultSlot').value='2';$('#userUrl').value='C';$('#master').value='xlx026.net';$('#masterPort').value='62030';}updateRadioProtocolForm();};

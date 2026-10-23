@@ -178,7 +178,7 @@ export async function handleApi(request,env,url=new URL(request.url)){
 async function api(request,env,url,config){
   const route=url.pathname,method=request.method,db=config.db;
   const noticeResponse=await releaseNotices.handleApi(request,env,url,config);if(noticeResponse)return noticeResponse;
-  if(route==='/v1/status'&&method==='GET'){const mode=await verificationMode(config,env);return json(200,{version:'1.4.6',chatAttachments:true,maxAttachmentBytes:15728640,registration:true,verificationConfigured:mode!=='unavailable',verificationMode:mode,developmentMode:false,bridgeConnected:await bridgeConnected(config,env),downloadRequiresVerification:true,owner:env.OWNER_NAME,privacyEmail:env.PRIVACY_EMAIL,downloads:{android:downloadMetadata(env,config,'android'),windows:downloadMetadata(env,config,'windows')}});}
+  if(route==='/v1/status'&&method==='GET'){const mode=await verificationMode(config,env);return json(200,{version:'1.4.7',chatAttachments:true,maxAttachmentBytes:15728640,registration:true,verificationConfigured:mode!=='unavailable',verificationMode:mode,developmentMode:false,bridgeConnected:await bridgeConnected(config,env),downloadRequiresVerification:true,owner:env.OWNER_NAME,privacyEmail:env.PRIVACY_EMAIL,downloads:{android:downloadMetadata(env,config,'android'),windows:downloadMetadata(env,config,'windows')}});}
   if(route.startsWith('/v1/whatsapp/')&&method==='POST'){
     await bridgeAuth(config,env,request);await rate(config,request,'whatsapp-bridge',120);const raw=await body(request),now=Date.now();
     if(route==='/v1/whatsapp/webhook'){

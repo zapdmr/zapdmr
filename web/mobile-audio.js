@@ -32,6 +32,7 @@
       if (!isAndroid()) return;
       return plugin.saveRadioConfig(config);
     },
+    async radioProfiles(options={action:"list"}) { return plugin.radioProfiles(options); },
     async loadRadioConfig() {
       return isAndroid() ? plugin.loadRadioConfig() : {};
     },
