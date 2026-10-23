@@ -229,6 +229,7 @@ export async function startServer(options: StartOptions = {}) {
     level: number; direction: 'IDLE' | 'TX' | 'RX'; callsign: string; callerName: string; talkgroupId: number | null;
   } = { level: 0, direction: 'IDLE', callsign: '', callerName: '', talkgroupId: null };
   let shuttingDown = false;
+  let updatePreparing=false;
   let audioSidecar: { state: string; status?: string; error?: AudioSidecarError | { ok: false; code: 'INVALID_ERROR_FRAME'; message: string } } = {
     state: 'not-configured'
   };
@@ -574,6 +575,7 @@ export async function startServer(options: StartOptions = {}) {
     audioLaunchGeneration += 1;
     audioCaptureReady = false;
     audioRenderReady = false;
+    gateway.setRxPlayback(false);
     gateway.setAudioReady(false);
     const gatewayState = gateway.status();
     if (gatewayState.pttArmed)
@@ -636,6 +638,9 @@ export async function startServer(options: StartOptions = {}) {
             audioRenderReady = false;
           }
 
+          if(message==='RX_PLAYBACK_ACTIVE')gateway.setRxPlayback(true);
+          if(message==='RX_PLAYBACK_IDLE'||message.startsWith('AUDIO_STOPPED')||message.startsWith('AUDIO_STARTING'))gateway.setRxPlayback(false);
+          if(message==='PTT_RX_BLOCKED')void gateway.setPtt(false,Number(gateway.status().talkgroupId||settings.selectedTalkgroupId));
           const ready = audioCaptureReady && audioRenderReady;
           if (ready) audioRestartAttempt = 0;
           gateway.setAudioReady(ready);
@@ -727,7 +732,9 @@ export async function startServer(options: StartOptions = {}) {
     const matchesTarget=gateway.isSelectedVoicePacket(packet,voiceTarget?.id||Number(rxTargetTalkgroupId||settings.selectedTalkgroupId),voiceTarget?.callType||'group');
     if (audioClient && audioSidecar.state === 'ready' && !audioTestRunning && !talkgroupBurstPending && matchesTarget) {
       rxAcceptedFrames++;
-      for (const codeword of gateway.receiveVoiceCodewords(packet)) {
+      const codewords=gateway.receiveVoiceCodewords(packet);
+      if(codewords.length)gateway.setRxPlayback(true);
+      for (const codeword of codewords) {
         try { audioClient.send(AudioSidecarMessage.rxFec, codeword); }
         catch (error) { console.warn('ZapDMRAudio RX:', (error as Error).message); break; }
       }
@@ -884,6 +891,7 @@ export async function startServer(options: StartOptions = {}) {
         return;
       }
       if (message.type === 'ptt-start') {
+        if(updatePreparing){rejectMobileMessage('Aguarde a reinicialização para atualizar.');return;}
         if (!gateway.status().connected || !audioClient || audioSidecar.state !== 'ready') {
           rejectMobileMessage('Ligue o gateway HBP e confirme que o vocoder está pronto antes do PTT.');
           return;
@@ -968,6 +976,7 @@ export async function startServer(options: StartOptions = {}) {
   }));
   let profileMutation=false;
   app.use((req,res,next)=>{
+    if(updatePreparing&&req.method!=='GET'&&req.path!=='/api/ptt')return res.status(409).json({error:'Aguarde a reinicialização para atualizar.',message:'Aguarde a reinicialização para atualizar.'});
     const mutating=req.method==='POST'&&(req.path==='/api/settings'||req.path==='/api/profiles'||/^\/api\/profiles\/[^/]+\/activate$/.test(req.path))||req.method==='DELETE'&&/^\/api\/profiles\/[^/]+$/.test(req.path);
     if(profileMutation && (mutating||['/api/connect','/api/ptt','/api/link-talkgroup','/api/voice-target'].includes(req.path)))return res.status(409).json({error:'Aguarde a troca de perfil.',message:'Aguarde a troca de perfil.'});
     if(mutating)profileMutation=true;
@@ -1339,6 +1348,7 @@ export async function startServer(options: StartOptions = {}) {
   });
   app.post('/api/ptt', async (req, res) => {
     const active = req.body?.active === true;
+    if(active&&updatePreparing)return res.status(409).json({accepted:false,message:'Atualização em preparação; aguarde a reinicialização.'});
     const callType=voiceTarget?.callType||'group';
     const talkgroupId = voiceTarget?.id||Number(req.body?.talkgroupId ?? settings.selectedTalkgroupId);
     const slot = Number(req.body?.slot ?? settings.defaultSlot ?? 1);
@@ -1518,6 +1528,15 @@ export async function startServer(options: StartOptions = {}) {
     }
   }
   return { url: `http://127.0.0.1:${address.port}`, port: address.port,
+    isTransmitting:()=>Boolean(gateway.status().pttArmed),
+    canStartPtt:()=>!shuttingDown&&!updatePreparing&&!profileMutation&&!audioTestRunning&&!talkgroupBurstPending&&gateway.status().pttReady,
+    prepareForUpdate:async()=>{
+      if(gateway.status().pttArmed||profileMutation||audioTestRunning)throw new Error('Encerre a transmissão ou a operação em curso antes de atualizar.');
+      updatePreparing=true;
+      connectionWanted=false;
+      if(reconnectTimer)clearTimeout(reconnectTimer);
+      await gateway.disconnect(false);
+    },
     close: async () => {
       shuttingDown = true;
       serialPtt.close();aprs.close();clearInterval(usageTimer);

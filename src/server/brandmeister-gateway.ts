@@ -37,21 +37,35 @@ export class BrandMeisterGateway extends EventEmitter {
   private userUrl = '';
   private hbpOptions = '';
   private rxUntil = 0;
+  private rxPlaybackActive = false;
   private rxStream = 0;
   private rxGuardTimer?: NodeJS.Timeout;
   private xlxAudioReceived = false;
   private receiveCallType: DmrCallType = 'group';
   private rxProtectionMs = 500;
-  private rxBusy() { return Date.now() < this.rxUntil; }
+  private rxBusy() { return this.rxPlaybackActive || Date.now() < this.rxUntil; }
+  private publishRxGuard() {
+    if(this.rxGuardTimer)clearTimeout(this.rxGuardTimer);
+    this.rxGuardTimer=undefined;
+    if(!this.rxPlaybackActive && this.rxUntil>Date.now())
+      this.rxGuardTimer=setTimeout(()=>this.emit('status',this.status()),this.rxUntil-Date.now()+5);
+    this.emit('status',this.status());
+  }
+  /** Native playback includes silent PCM, the decoder queue and the WASAPI buffer. */
+  setRxPlayback(active:boolean) {
+    if(this.state!=='connected')active=false;
+    if(this.rxPlaybackActive===active)return;
+    this.rxPlaybackActive=active;
+    if(!active)this.rxUntil=Math.max(this.rxUntil,Date.now()+this.rxProtectionMs);
+    this.publishRxGuard();
+  }
   private observeReception(packet: Buffer) {
-    if(this.state!=='connected'||packet.readUIntBE(5,3)===this.radioId||!this.isSelectedVoicePacket(packet,this.rxTarget,this.receiveCallType))return;
+    if(this.state!=='connected'||(this.txArmed&&packet.readUIntBE(5,3)===this.radioId)||!this.isSelectedVoicePacket(packet,this.rxTarget,this.receiveCallType))return;
     const kind=packet[15]&0x3f,stream=packet.readUInt32BE(16);
     if(kind===0x22){if(stream===this.rxStream)this.rxUntil=Date.now()+this.rxProtectionMs;}
     else if(kind===0x21||(packet[15]&0x20)===0){this.rxStream=stream;this.rxUntil=Date.now()+1200+this.rxProtectionMs;}else return;
     if(this.xlx&&(packet[15]&0x20)===0)this.xlxAudioReceived=true;
-    if(this.rxGuardTimer)clearTimeout(this.rxGuardTimer);
-    this.rxGuardTimer=setTimeout(()=>this.emit('status',this.status()),Math.max(1,this.rxUntil-Date.now()+5));
-    this.emit('status',this.status());
+    this.publishRxGuard();
   }
   private state: GatewayState = 'disconnected';
   private stateMessage = 'Desligado.';
@@ -104,6 +118,8 @@ export class BrandMeisterGateway extends EventEmitter {
       protocol: this.protocol,
       xlxModule: this.xlx ? 'C' : undefined,
       rxBusy: this.rxBusy(),
+      rxPlaybackActive: this.rxPlaybackActive,
+      rxBlockedUntil: this.rxUntil,
       reception: this.terminal?.snapshot() || (this.xlx ? {protocol:'hbp',supported:true,state:this.state==='connected'?(this.xlxAudioReceived?'receiving':'awaiting-audio'):this.state,targetTalkgroupId:4003,message:this.state==='connected'?(this.xlxAudioReceived?'XLX026 · Módulo C · áudio recebido nesta sessão.':'XLX026 · login aceito; módulo C solicitado no RPTC. Aguardando áudio para confirmar recepção.'):this.stateMessage} : null) || {protocol:this.protocol,supported:this.protocol==='odtp',state:this.state==='connected'?'unsupported':this.state,targetTalkgroupId:this.rxTarget,message:this.state==='connected'?'Homebrew/HBP não oferece inscrição de TG sem PTT. Use ODTP num master compatível.':this.stateMessage},
       errorCode: this.lastErrorCode,
       connected: this.state === 'connected',
@@ -254,6 +270,7 @@ export class BrandMeisterGateway extends EventEmitter {
 
   receiveVoiceCodewords(packet: Buffer): Buffer[] {
     if (!isDmrDataPacket(packet)) return [];
+    if(this.txArmed&&packet.readUIntBE(5,3)===this.radioId)return []; // Do not play our own TX echo.
     const flags = packet[15];
     // The slot bit (bit 7) is deliberately not a filter: simplex hotspots
     // still need to play valid voice frames reported on either DMR slot.
@@ -309,7 +326,7 @@ export class BrandMeisterGateway extends EventEmitter {
 
     await this.disconnect(false);
     this.xlx=xlx;this.userUrl=xlx?'C':settings.userUrl||'';this.hbpOptions=settings.hbpOptions||'';
-    this.rxProtectionMs=Math.max(0,Math.min(3000,Number((settings.operation?.controls as any)?.rxProtectionMs)||500));
+    this.rxProtectionMs=Math.max(500,Math.min(3000,Number(settings.operation?.rxProtectionMs)||500));
     this.protocol=xlx?'hbp':settings.radioProtocol==='odtp'?'odtp':'hbp';
     this.rxTarget=xlx?4003:settings.selectedTalkgroupId;this.receiveCallType='group';
     this.callsign = callsign;
@@ -383,7 +400,7 @@ export class BrandMeisterGateway extends EventEmitter {
   }
 
   async disconnect(announce = true): Promise<ConnectResult> {
-    this.clearTimers();this.rxUntil=0;this.xlxAudioReceived=false;this.talkgroupActivity.clear();
+    this.clearTimers();this.rxUntil=0;this.rxPlaybackActive=false;this.xlxAudioReceived=false;this.talkgroupActivity.clear();
     if(this.rxGuardTimer)clearTimeout(this.rxGuardTimer);
     if (this.pendingConnect) {
       const pending = this.pendingConnect;

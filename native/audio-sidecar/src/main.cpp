@@ -498,6 +498,13 @@ public:
   bool running() const { return running_.load(); }
   void setPtt(bool active, uint32_t tg) {
     if (active && (tg == 0 || tg > 0xFFFFFF)) throw std::runtime_error("TalkGroup outside valid range");
+    if (active) {
+      std::lock_guard lock(playbackMutex_);
+      if (rxPlaybackActive_ || GetTickCount64() < rxTailUntil_) {
+        pipe_.status("PTT_RX_BLOCKED");
+        return;
+      }
+    }
     talkgroup_.store(active ? tg : 0);
     ptt_.store(active);
     if (!active) {
@@ -568,8 +575,15 @@ public:
   }
   void clearRx() {
     std::lock_guard lock(playbackMutex_);playback_.clear();
+    if(rxPlaybackActive_){rxPlaybackActive_=false;rxTailUntil_=GetTickCount64()+500;pipe_.status("RX_PLAYBACK_IDLE");}
+    rxDecoding_=false;
     const std::array<uint8_t,2> idle={2,0};pipe_.send(MSG_AUDIO_LEVEL,idle);
   }
+  void beginRxDecode() {
+    std::lock_guard lock(playbackMutex_);rxDecoding_=true;
+    if(!rxPlaybackActive_){rxPlaybackActive_=true;pipe_.status("RX_PLAYBACK_ACTIVE");}
+  }
+  void endRxDecode() { std::lock_guard lock(playbackMutex_);rxDecoding_=false; }
   void enqueuePlayback(const std::array<int16_t, kPcmSamplesPerFrame>& samples) {
     std::lock_guard lock(playbackMutex_);
     for (int16_t sample : samples) playback_.push_back(sample);
@@ -755,6 +769,7 @@ private:
         BYTE* destination = nullptr; checkHr(render->GetBuffer(frames, &destination), "Render GetBuffer");
         auto* pcm = reinterpret_cast<int16_t*>(destination);
         std::lock_guard lock(playbackMutex_);
+        UINT32 lastReceivedSample=0;
         for (UINT32 i = 0; i < frames; ++i) {
           if (playback_.empty()) pcm[i] = 0;
           else {
@@ -762,9 +777,16 @@ private:
             pcm[i] = static_cast<int16_t>(std::clamp(
                 std::lround(static_cast<double>(playback_.front()) * volume), -32768L, 32767L));
             playback_.pop_front();
+            lastReceivedSample=i+1;
           }
         }
         checkHr(render->ReleaseBuffer(frames, 0), "Render ReleaseBuffer");
+        if(rxPlaybackActive_){
+          if(lastReceivedSample)rxRenderedUntil_=GetTickCount64()+(padding+lastReceivedSample+7)/8;
+          if(!rxDecoding_&&playback_.empty()&&GetTickCount64()>=rxRenderedUntil_){
+            rxPlaybackActive_=false;rxTailUntil_=GetTickCount64()+500;pipe_.status("RX_PLAYBACK_IDLE");
+          }
+        }
       }
       client->Stop(); CloseHandle(event);
     } catch (const std::exception& e) {
@@ -790,6 +812,8 @@ private:
   std::wstring renderId_;
   std::mutex playbackMutex_;
   std::deque<int16_t> playback_;
+  bool rxPlaybackActive_=false,rxDecoding_=false;
+  ULONGLONG rxRenderedUntil_=0,rxTailUntil_=0;
   std::thread captureThread_;
   std::thread renderThread_;
   std::chrono::steady_clock::time_point lastTxAudioLevelAt_{};
@@ -939,7 +963,10 @@ void processClient(HANDLE pipe, Vocoder& vocoder, PipeWriter& writer) {
         case MSG_RX_FEC: {
           if (payload.size() != kDmrAmbeCodewordBytes) throw std::runtime_error("RX_FEC expects one 9-byte DMR AMBE codeword");
           if (!audio.running()) throw std::runtime_error("Start audio before sending RX_FEC");
-          const auto pcm = audio.decodeVoiceCodeword(payload.data());
+          audio.beginRxDecode();
+          std::array<int16_t,kPcmSamplesPerFrame> pcm{};
+          try { pcm=audio.decodeVoiceCodeword(payload.data()); }
+          catch (...) { audio.endRxDecode(); throw; }
           audio.reportAudioLevel(2, pcm);
           std::array<uint8_t, kPcmBytesPerFrame> pcmBytes{};
           for (size_t index = 0; index < pcm.size(); ++index) {
@@ -949,6 +976,7 @@ void processClient(HANDLE pipe, Vocoder& vocoder, PipeWriter& writer) {
           }
           writer.send(MSG_RX_PCM, pcmBytes);
           audio.enqueuePlayback(pcm);
+          audio.endRxDecode();
           break;
         }
         case MSG_AUDIO_TEST: {

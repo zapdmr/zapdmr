@@ -61,7 +61,7 @@ async function route(request, env) {
   if (pathname === '/healthz') {
     if (!env.DB) return json(503, {ok: false, message: 'Banco ainda não configurado.'});
     await env.DB.prepare('SELECT 1').first();
-    return json(200, {ok: true, version: '1.4.7'});
+    return json(200, {ok: true, version: '1.4.8'});
   }
   if (aliases[pathname]) return new Response(null, {status: 308, headers: {Location: aliases[pathname]}});
   const production = Boolean(env.OWNER_NAME && env.PRIVACY_EMAIL);

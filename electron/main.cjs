@@ -1,11 +1,16 @@
 const path = require('node:path');
 const fs = require('node:fs');
-const { app, BrowserWindow, ipcMain, globalShortcut, powerSaveBlocker, shell, dialog } = require('electron');
-if (require('electron-squirrel-startup')) app.quit();
+const { app, BrowserWindow, ipcMain, globalShortcut, powerSaveBlocker, shell, dialog, autoUpdater } = require('electron');
+if (require('electron-squirrel-startup')) {app.quit();return;}
+if (!app.requestSingleInstanceLock()) {app.quit();return;}
+app.on('second-instance',()=>{const window=BrowserWindow.getAllWindows()[0];if(window){if(window.isMinimized())window.restore();window.show();window.focus();}});
 const { startServer } = require('../dist/server/index.js');
+const { createWindowsUpdater } = require('./windows-updater.cjs');
 
 let localServer;
 let shuttingDown = false;
+let desktopUpdater, closePromise;
+const closeRadio = () => closePromise ||= Promise.resolve(localServer?.close());
 let powerBlocker, pttShortcut, mediaShortcut, scanShortcut;
 function resolveAudioSidecarExe() {
   if (process.env.ZAPDMR_AUDIO_SIDECAR_EXE) return process.env.ZAPDMR_AUDIO_SIDECAR_EXE;
@@ -32,6 +37,22 @@ async function openWindow() {
     icon: path.join(__dirname, '..', 'assets', 'ZapDMR.ico'),
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: path.join(__dirname, 'preload.cjs') }
   });
+  app.setAppUserModelId('com.squirrel.zapdmr.ZapDMR');
+  desktopUpdater=createWindowsUpdater({app,autoUpdater,userDataDir:app.getPath('userData'),
+    radio:()=>({...localServer,close:closeRadio}),onState:value=>{if(!window.isDestroyed())window.webContents.send('zapdmr-update-state',value);}});
+  ipcMain.removeHandler('zapdmr-update');
+  ipcMain.handle('zapdmr-update',(event,action)=>{
+    if(event.sender!==window.webContents||event.senderFrame!==window.webContents.mainFrame||new URL(event.senderFrame?.url||'about:blank').origin!==new URL(localServer.url).origin)throw new Error('Origem inválida.');
+    if(action==='status')return desktopUpdater.snapshot();
+    if(action==='check')return desktopUpdater.check();
+    if(action==='install')return desktopUpdater.install();
+    throw new Error('Ação de atualização inválida.');
+  });
+  const pttFromHardware=()=>{
+    // Always allow a release; block a new press in the authoritative radio service.
+    if(shuttingDown||desktopUpdater?.isInstalling()||!localServer)return;
+    if(localServer.isTransmitting()||localServer.canStartPtt())window.webContents.send('zapdmr-ptt-key');
+  };
   ipcMain.removeHandler('zapdmr-operation');
   ipcMain.removeHandler('zapdmr-external');
   ipcMain.removeHandler('zapdmr-save-attachment');
@@ -57,9 +78,9 @@ async function openWindow() {
     window.setFullScreen(options.hideStatusBar === true);
     if(pttShortcut)globalShortcut.unregister(pttShortcut);
     pttShortcut='F9';
-    const shortcutRegistered=globalShortcut.register(pttShortcut,()=>window.webContents.send('zapdmr-ptt-key'));
+    const shortcutRegistered=globalShortcut.register(pttShortcut,pttFromHardware);
     if(mediaShortcut){globalShortcut.unregister(mediaShortcut);mediaShortcut=undefined;}
-    if(options.bluetoothPtt === true){mediaShortcut='MediaPlayPause';globalShortcut.register(mediaShortcut,()=>window.webContents.send('zapdmr-ptt-key'));}
+    if(options.bluetoothPtt === true){mediaShortcut='MediaPlayPause';globalShortcut.register(mediaShortcut,pttFromHardware);}
     if(scanShortcut){globalShortcut.unregister(scanShortcut);scanShortcut=undefined;}
     const scanKey=options.scanKey;
     if(['F7','F8'].includes(scanKey)){scanShortcut=scanKey;globalShortcut.register(scanShortcut,()=>window.webContents.send('zapdmr-scan-key'));}
@@ -67,15 +88,16 @@ async function openWindow() {
   });
   window.webContents.setUserAgent(window.webContents.getUserAgent()+' ZapDMR/'+app.getVersion());
   await window.loadURL(localServer.url);
+  desktopUpdater.start();
 }
 app.whenReady().then(openWindow);
 app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) openWindow(); });
 app.on('before-quit', (event) => {
   globalShortcut.unregisterAll();
   if(powerBlocker !== undefined){powerSaveBlocker.stop(powerBlocker);powerBlocker=undefined;}
-  if (!localServer || shuttingDown) return;
+  if (!localServer || shuttingDown || desktopUpdater?.isInstalling()) return;
   event.preventDefault();
   shuttingDown = true;
-  Promise.resolve(localServer.close()).finally(() => app.exit(0));
+  Promise.allSettled([closeRadio(),desktopUpdater?.close()]).finally(() => app.exit(0));
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

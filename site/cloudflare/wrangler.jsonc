@@ -44,10 +44,10 @@
     "DOWNLOAD_ANDROID_URL": "https://github.com/zapdmr/zapdmr/releases/download/v1.4.7/ZapDMR-Android-1.4.7.apk",
     "DOWNLOAD_ANDROID_BYTES": "8640458",
     "DOWNLOAD_ANDROID_SHA256": "455acb55b5046f388c4fe71343fe28b5ba141e2cb56a5d171179719de842817b",
-    "DOWNLOAD_WINDOWS_URL": "https://github.com/zapdmr/zapdmr/releases/download/v1.4.7/ZapDMR-Windows-1.4.7.exe",
-    "DOWNLOAD_WINDOWS_BYTES": "160721920",
-    "DOWNLOAD_WINDOWS_SHA256": "53069cae3a6b3066da0c23b99fe77f53bd2c23c1e0966872a08e34a617af8755",
-    "SOURCE_URL": "https://github.com/zapdmr/zapdmr/releases/download/v1.4.7/ZapDMR-Android-1.4.7-source.zip"
+    "DOWNLOAD_WINDOWS_URL": "https://github.com/zapdmr/zapdmr/releases/download/v1.4.8/ZapDMR-Windows-1.4.8.exe",
+    "DOWNLOAD_WINDOWS_BYTES": "160731136",
+    "DOWNLOAD_WINDOWS_SHA256": "1e7978d8aeddf8ec3d9a819fc85b1215c7eb081abdaa1228611a0d97970cc8d3",
+    "SOURCE_URL": "https://github.com/zapdmr/zapdmr/releases/download/v1.4.8/ZapDMR-Windows-1.4.8-source.zip"
   },
   "triggers": {
     "crons": [

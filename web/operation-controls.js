@@ -18,7 +18,7 @@
   pttPane.innerHTML=`<div class="settings-card"><h3>Premir para falar</h3><p class="hint tiny">Modo, botões, tons</p>
     <label>Modo do botão de falar<select id="pttMode"><option value="toggle">Tocar — um toque liga, outro desliga</option><option value="hold">Manter — manter premido para transmitir</option></select></label>
     <label>Mapeamento do botão físico<select id="hardwareKey"><option value="F9">F9</option><option value="VolumeUp">Volume + (Android)</option><option value="VolumeDown">Volume − (Android)</option></select></label>
-    <label>Proteção após RX no Android (ms)<input id="rxProtectionMs" type="number" min="0" max="3000" step="100" ${native()?'':'disabled'}></label><p class="hint tiny">No Android, bloqueia o PTT durante RX local e por este intervalo após a fala. Não garante que toda a rede esteja livre.</p>
+    <label>Proteção após RX no Android (ms)<input id="rxProtectionMs" type="number" min="0" max="3000" step="100" ${native()?'':'disabled'}></label><p class="hint tiny">No Android, este ajuste controla a proteção após RX local. No Windows, o bloqueio acompanha a recepção e a reprodução, com proteção mínima de 500 ms após a fala. Não garante que toda a rede esteja livre.</p>
     ${switchRow('bluetoothPtt','PTT Bluetooth / botão de auscultadores')}
     <p class="hint tiny">Botões de média ou HID padrão. A compatibilidade depende do acessório e do sistema. F9 global no Windows alterna TX.</p>
     ${switchRow('allowLocked','Falar com o ecrã bloqueado (Android)')}
@@ -100,13 +100,13 @@
   let pttBusy=false,wantTransmit=false,lastTxState=false,lastRxBeep=0,wasReceiving=false,wakeLock,desktopVox,voxSilence=0,voxTriggered=false,voxNeedsQuiet=false,voxActivation=0,desktopShortcutReady=false;
   function beep(){if(native())return;try{playTotAlert();}catch{}}
   async function requestPtt(desired){
-    if(desired&&gatewayStatus.rxBusy){toast("RX OCUPADO — AGUARDE");return;}
+    if(desired&&gatewayStatus.rxBusy){wantTransmit=false;reflectTx();toast("RX OCUPADO — AGUARDE");return;}
     if(desired&&window.ZapDMRConsole?.isLearning?.()){toast('Termine a aprendizagem do botão SPP antes de transmitir.');return;}
     if(desired&&(localAudioTestActive||gatewayStatus.talkgroupBurstActive||talkgroupBurstStatus.pending)){toast(localAudioTestActive?'Aguarde o teste local de áudio terminar.':'Aguarde a troca de TalkGroup terminar.');return;}
     wantTransmit=Boolean(desired);if(pttBusy){if(!wantTransmit&&native())void mobileAudio.stopPtt();return;}pttBusy=true;
     try{
       while(wantTransmit!==active()){
-        const on=wantTransmit;if(on&&!gatewayStatus.connected){wantTransmit=false;throw new Error('Ligue primeiro ao master.');}
+        const on=wantTransmit;if(on&&gatewayStatus.rxBusy){wantTransmit=false;throw new Error('RX OCUPADO — AGUARDE');}if(on&&!gatewayStatus.connected){wantTransmit=false;throw new Error('Ligue primeiro ao master.');}
         if(on)stopTalkgroupScan();
         if(native()){
           if(on){mobilePttHolding=true;mobilePttPending=true;const group=transmitTarget();await mobileAudio.startPtt(group?.id,group?.slot||settings.defaultSlot||1);reflectTx();break; /* Native PTT event confirms acceptance. */}
@@ -119,7 +119,7 @@
       }
     }catch(error){wantTransmit=false;mobilePttHolding=false;mobilePttPending=false;if(native())void mobileAudio.stopPtt();toast(error.message);}finally{pttBusy=false;}
   }
-  function reflectTx(){const tx=active();if(tx!==lastTxState){if(!native()&&(tx?prefs().beepStart:prefs().beepStop))beep();lastTxState=tx;}
+  function reflectTx(){const tx=active();if(!tx&&gatewayStatus.rxBusy)wantTransmit=false;$('#ptt').classList.toggle('rx-blocked',!tx&&Boolean(gatewayStatus.rxBusy));$('#ptt').setAttribute('aria-label',!tx&&gatewayStatus.rxBusy?'PTT bloqueado durante recepção e proteção após RX':'Premir para falar');if(tx!==lastTxState){if(!native()&&(tx?prefs().beepStart:prefs().beepStop))beep();lastTxState=tx;}
     $('#ptt').classList.toggle('transmitting',tx);$('#ptt').disabled=!tx&&(!gatewayStatus.connected||!gatewayStatus.pttReady||Boolean(gatewayStatus.rxBusy)||Boolean(gatewayStatus.talkgroupBurstActive));$('#ptt').textContent=!tx&&gatewayStatus.rxBusy?'RX OCUPADO — AGUARDE':tx?'■ TX · transmitir / parar':prefs().pttMode==='toggle'?'🎙 TX · tocar para falar':'🎙 TX · manter para falar';$('#ptt').hidden=prefs().hidePttButton&&!tx;}
   const txButton=$('#ptt');txButton.style.touchAction='none';
   txButton.addEventListener('pointerdown',event=>{if(event.button!==0)return;event.preventDefault();if(prefs().pttMode==='hold'){txButton.setPointerCapture?.(event.pointerId);void requestPtt(true);}});

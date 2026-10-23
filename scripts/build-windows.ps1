@@ -146,6 +146,19 @@ try {
 
   if (-not (Test-Path -LiteralPath (Join-Path $releaseDirectory 'RELEASES') -PathType Leaf)) { throw 'Arquivo RELEASES ausente.' }
   if (-not (Test-Path -LiteralPath $installerPath -PathType Leaf)) { throw 'ZapDMR-Setup.exe ausente.' }
+  # Publish these three assets together. The in-app updater consumes the full
+  # Squirrel package; publishing only the .exe cannot enable future updates.
+  $publishDirectory = Join-Path $projectRoot ("release\windows-$($package.version)")
+  New-Item -ItemType Directory -Path $publishDirectory -Force | Out-Null
+  $publicInstallerName = "ZapDMR-Windows-$($package.version).exe"
+  $publicPackageName = Split-Path -Leaf $fullPackagePath
+  Copy-Item -LiteralPath $installerPath -Destination (Join-Path $publishDirectory $publicInstallerName) -Force
+  Copy-Item -LiteralPath $fullPackagePath -Destination (Join-Path $publishDirectory $publicPackageName) -Force
+  $releaseLine = @(Get-Content -LiteralPath (Join-Path $releaseDirectory 'RELEASES') | Where-Object { $_ -match (' ' + [regex]::Escape($publicPackageName) + ' ') })
+  if ($releaseLine.Count -ne 1) { throw 'RELEASES não contém exatamente um pacote da versão atual.' }
+  [IO.File]::WriteAllText((Join-Path $publishDirectory 'RELEASES'), $releaseLine[0] + "`n", [Text.UTF8Encoding]::new($false))
+  $sumLines = @($publicInstallerName, $publicPackageName, 'RELEASES') | ForEach-Object { (Get-Sha256Hex (Join-Path $publishDirectory $_)).ToLowerInvariant() + '  ' + $_ }
+  [IO.File]::WriteAllText((Join-Path $publishDirectory 'SHA256SUMS.txt'), ($sumLines -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
   $tempRoot = [System.IO.Path]::GetFullPath($env:TEMP).TrimEnd('\') + '\'
   $resolvedTempPackageDirectory = [System.IO.Path]::GetFullPath($temporaryPackageDirectory)
   if ($resolvedTempPackageDirectory.StartsWith($tempRoot, [System.StringComparison]::OrdinalIgnoreCase) -and

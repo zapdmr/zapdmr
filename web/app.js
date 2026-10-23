@@ -721,8 +721,9 @@ function showStatus(data) {
   const connectionPending = ['resolving', 'waiting-login', 'waiting-auth', 'waiting-config'].includes(gateway.state);
   $('#connect').textContent = connected ? 'Desligar' : reconnecting || connectionPending ? 'Cancelar ligação' : 'Ligar ao master';
   $('#connect').disabled = disconnectInProgress || Boolean(gateway.talkgroupBurstActive) || Boolean(talkgroupBurstStatus.pending);
-  $('#ptt').disabled = !gateway.pttReady || disconnectInProgress || Boolean(gateway.talkgroupBurstActive) || Boolean(talkgroupBurstStatus.pending);
-  $('#ptt').textContent = armed ? '■ Desarmar PTT' : '🎙 Preparar PTT';
+  $('#ptt').disabled = !armed && (!gateway.pttReady || gateway.rxBusy || disconnectInProgress || Boolean(gateway.talkgroupBurstActive) || Boolean(talkgroupBurstStatus.pending));
+  $('#ptt').textContent = armed ? '■ Desarmar PTT' : gateway.rxBusy ? 'RX OCUPADO — AGUARDE' : '🎙 Preparar PTT';
+  window.ZapDMROperation?.reflectTx();
   const audio = data.audioSidecar || {};
   $('#audioState').textContent = audio.state === 'ready'
     ? 'Áudio auxiliar: pronto.'

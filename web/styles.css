@@ -441,3 +441,4 @@ body>.toast.show{transform:translate(-50%,0)}
 .chat-conversations{display:flex;gap:6px;overflow-x:auto;padding:8px 0;flex-shrink:0}.chat-conversations button{white-space:nowrap;font-size:13px;padding:8px 10px}.chat-inbox-notice{position:fixed;z-index:10000;bottom:90px;left:12px;right:12px;margin:auto;max-width:480px;padding:14px;border-radius:12px;border:1px solid #20ce77;background:#123a2b;color:#fff;font:inherit;box-shadow:0 4px 20px #0008}.chat-inbox-notice[hidden]{display:none}
 
 .app-update-dialog pre{white-space:pre-wrap;font:inherit;max-height:35vh;overflow:auto}.app-update-dialog strong{display:block;margin:10px 0}
+#ptt.rx-blocked:disabled{background:var(--surface-2,#34433d);color:var(--muted,#b4bdb8);border:2px solid #dbab47;opacity:.85;cursor:not-allowed;box-shadow:none}
