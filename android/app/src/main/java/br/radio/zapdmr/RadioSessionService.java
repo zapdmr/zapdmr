@@ -440,7 +440,7 @@ public final class RadioSessionService extends Service {
     }
     private boolean remoteAllowed(){android.app.KeyguardManager lock=(android.app.KeyguardManager)getSystemService(KEYGUARD_SERVICE);return controls().optBoolean("allowLocked")||lock==null||!lock.isKeyguardLocked();}
     private void togglePtt(){if(ptt.get())stopPtt();else if(!CarModeState.active)startPtt(selectedTalkgroup,selectedSlot);}
-    private void refreshCarAudioWhenIdle(){if(destroyed)return;if(CarModeState.outputId==0&&CarModeState.inputId==0&&!CarAudio.hasOverride()){if(CarModeState.active){AudioTrack current=player;if(current!=null)CarAudio.output(this,current);}return;}if(ptt.get()||txStopping||receptionBusy()){controlsHandler.postDelayed(this::refreshCarAudioWhenIdle,300);return;}try{releasePlayer();abandonRxFocus();bluetoothRoute=null;if(CarModeState.active)bluetoothAudioActive=CarAudio.configure(this);else{CarAudio.configure(this);configureBluetooth();}}catch(Exception error){emit("error",json("message","Rota de áudio: "+safeMessage(error)));}}
+    private void refreshCarAudioWhenIdle(){if(destroyed)return;if(CarModeState.outputId==0&&CarModeState.inputId==0&&!CarAudio.hasOverride()){if(CarModeState.active){boolean communication=((android.media.AudioManager)getSystemService(AUDIO_SERVICE)).getMode()==android.media.AudioManager.MODE_IN_COMMUNICATION;if(bluetoothAudioActive!=communication){bluetoothAudioActive=communication;releasePlayer();abandonRxFocus();}AudioTrack current=player;if(current!=null)CarAudio.output(this,current);}return;}if(ptt.get()||txStopping||receptionBusy()){controlsHandler.postDelayed(this::refreshCarAudioWhenIdle,300);return;}try{releasePlayer();abandonRxFocus();bluetoothRoute=null;if(CarModeState.active)bluetoothAudioActive=CarAudio.configure(this);else{CarAudio.configure(this);configureBluetooth();}}catch(Exception error){CarModeState.inputId=0;CarModeState.outputId=0;try{CarAudio.release(this);}catch(Exception ignored){}bluetoothAudioActive=((android.media.AudioManager)getSystemService(AUDIO_SERVICE)).getMode()==android.media.AudioManager.MODE_IN_COMMUNICATION;CarAudio.routeStatus="Rota recusada; padrão restaurado: "+safeMessage(error);emit("error",json("message",CarAudio.routeStatus));}}
     private void configureBluetooth(){
         if(CarModeState.active)return;
         boolean enabled=controls().optBoolean("bluetoothPtt");
@@ -480,7 +480,7 @@ public final class RadioSessionService extends Service {
                 while(voxMonitor&&!ptt.get()&&carVoxReady()&&generation==CarModeState.voxGeneration){
                     int got=0;while(got<160&&voxMonitor){int count=audio.read(samples,got,160-got);if(count<=0)throw new java.io.IOException("Microfone VOX indisponível.");got+=count;}if(got!=160)break;
                     android.media.AudioDeviceInfo route=audio.getRoutedDevice();if(route==null){if(android.os.SystemClock.elapsedRealtime()>routeDeadline){stopCarVox("Microfone sem rota confirmada; VOX suspenso.");break;}continue;}if((CarModeState.inputId>0&&route.getId()!=CarModeState.inputId)||(carVoxInputId>0&&route.getId()!=carVoxInputId)){stopCarVox("Microfone mudou; VOX suspenso para novo teste.");break;}carVoxInputId=route.getId();
-                    boolean busy=receptionBusy();CarVoxGate.Result result=gate.frame(detector.speech(samples),CarVoxGate.db(samples),CarVoxGate.zcr(samples),!busy,false,android.os.SystemClock.elapsedRealtime());
+                    CarAudio.verifyCapture(this,audio);boolean busy=receptionBusy();CarVoxGate.Result result=gate.frame(detector.speech(samples),CarVoxGate.db(samples),CarVoxGate.zcr(samples),!busy,false,android.os.SystemClock.elapsedRealtime());
                     if(result==CarVoxGate.Result.UNSAFE){stopCarVox(gate.reason());break;}
                     if(result==CarVoxGate.Result.START){trigger=true;break;}
                     if(result==CarVoxGate.Result.RX_BLOCKED)carVoxStatus("RX_BLOCKED","VOX bloqueado durante RX e proteção contra eco.");
@@ -736,8 +736,7 @@ public final class RadioSessionService extends Service {
             int rx=Integer.parseInt(settings.optString("rxFrequencyHz","0")); int tx=Integer.parseInt(settings.optString("txFrequencyHz","0"));
             txPrivateCall=privateTargetId>0;txTalkgroup=tg; txSlot=isXlx()?2:(rx>0&&rx==tx)?1:(slot==2?2:1); voiceSequence=0; packetSequence=0;
             streamId=new SecureRandom().nextInt() & 0xffffffffL; if(streamId==0)streamId=1;
-            sendDmr(DmrFrameEngine.fullLc(tg,Integer.parseInt(settings.getString("dmrId")),false,txPrivateCall),0x21);
-            txHeaderSent=true;
+            if(!CarModeState.active){sendDmr(DmrFrameEngine.fullLc(tg,Integer.parseInt(settings.getString("dmrId")),false,txPrivateCall),0x21);txHeaderSent=true;} // Car mode waits for a confirmed capture before sending its header.
             startForegroundCompat(NOTIFICATION_ID, notification("Transmitindo na TG " + tg), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE | ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
             tone(true);
             AudioRecord audio=createRecorder(); recorder=audio; audio.startRecording();
@@ -779,6 +778,8 @@ public final class RadioSessionService extends Service {
             while(ptt.get()) {
                 int got=0; while(got<samples.length&&ptt.get()){int count=audio.read(samples,got,samples.length-got,AudioRecord.READ_BLOCKING);if(count<0)throw new java.io.IOException("Falha ao ler microfone: "+count);got+=count;}
                 if(!ptt.get()||got!=samples.length)break;
+                CarAudio.verifyCapture(this,audio);
+                synchronized(receiveGuard){if(!ptt.get())break;if(!txHeaderSent){sendDmr(DmrFrameEngine.fullLc(txTalkgroup,Integer.parseInt(settings.getString("dmrId")),false,txPrivateCall),0x21);txHeaderSent=true;}}
                 if(carVoxTransmitting){
                     if(!carVoxReady()||receptionBusy()||audio.getRoutedDevice()==null||audio.getRoutedDevice().getId()!=carVoxInputId){CarModeState.disarmVox();carVoxStatus("OFF","VOX suspenso por condição de segurança/RX.");break;}
                     CarVoxGate.Result result=carVoxGate.frame(carDetector.speech(samples),CarVoxGate.db(samples),CarVoxGate.zcr(samples),true,true,android.os.SystemClock.elapsedRealtime());
@@ -840,7 +841,7 @@ public final class RadioSessionService extends Service {
         if(ptt.get()||linking.get()||pendingLinks.get()>0||!testingAudio.compareAndSet(false,true)){emit("audioTest",json("ok",false,"message","Termine a transmissão ou o teste em curso antes de testar o áudio."));return;}
         stopVoxMonitor();
         new Thread(() -> {
-            AudioRecord capture=null;
+            AudioRecord capture=null;final boolean carTest=CarModeState.active;
             try{
                 for(int wait=0;voxRecorder!=null&&wait<30;wait++)Thread.sleep(10);
                 VocoderHelper codec=ensureVocoder();if(codec==null)throw new java.io.IOException("O vocoder ARM não iniciou. Confira o firmware e a compatibilidade ARM deste dispositivo.");
@@ -848,17 +849,17 @@ public final class RadioSessionService extends Service {
                 if(microphone){
                     if(ContextCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)throw new java.io.IOException("Permita o microfone para gravar o teste local.");
                     startForegroundCompat(NOTIFICATION_ID,notification("Teste local do microfone · sem transmitir"),ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE|ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
-                    capture=createRecorder();capture.startRecording();
-                    for(int f=0;f<150;f++){short[] samples=new short[160];int got=0;while(got<160){int count=capture.read(samples,got,160-got);if(count<=0)throw new java.io.IOException("Não foi possível capturar o microfone.");got+=count;}byte[] pcm=new byte[320];int gain=CarModeState.active?CarModeState.txGainPercent:settings.optInt("txGainPercent",100);for(int i=0;i<160;i++){int sample=CarTxGain.apply(samples[i],gain,CarModeState.active);pcm[2*i]=(byte)sample;pcm[2*i+1]=(byte)(sample>>8);}frames.add(pcm);emitAudioLevel("TX",pcm,selectedTalkgroup,0);}
+                    capture=createRecorder();capture.startRecording();emit("carMicTest",CarAudio.diagnostic(this).put("phase","recording").put("message","Gravando 3 segundos localmente, sem transmitir."));
+                    for(int f=0;f<150;f++){if(destroyed||carTest&&!CarModeState.active)throw new java.io.IOException("Teste encerrado ao sair do Modo Carro.");short[] samples=new short[160];int got=0;while(got<160){int count=capture.read(samples,got,160-got);if(count<=0)throw new java.io.IOException("Não foi possível capturar o microfone.");got+=count;}CarAudio.verifyCapture(this,capture);if(f%5==0){double energy=0;for(short v:samples)energy+=(double)v*v;double level=20*Math.log10(Math.max(1e-6,Math.sqrt(energy/160)/32768));emit("carMicTest",CarAudio.diagnostic(this).put("phase","recording").put("levelDb",level));}byte[] pcm=new byte[320];int gain=CarModeState.active?CarModeState.txGainPercent:settings.optInt("txGainPercent",100);for(int i=0;i<160;i++){int sample=CarTxGain.apply(samples[i],gain,CarModeState.active);pcm[2*i]=(byte)sample;pcm[2*i+1]=(byte)(sample>>8);}frames.add(pcm);emitAudioLevel("TX",pcm,selectedTalkgroup,0);}
                     capture.stop();capture.release();capture=null;
                 }else{
                     for(int f=0;f<30;f++){byte[] pcm=new byte[320];for(int i=0;i<160;i++){int sample=(int)(Math.sin(2*Math.PI*440*(f*160+i)/8000)*7000);pcm[2*i]=(byte)sample;pcm[2*i+1]=(byte)(sample>>8);}frames.add(pcm);}
                 }
-                for(byte[] pcm:frames){byte[] decoded=codec.decodeFec(codec.encodeFec(pcm));if(!playPcm(decoded))throw new java.io.IOException("A reprodução de áudio local falhou. Confira volume e saída do Android.");emitAudioLevel("RX",decoded,selectedTalkgroup,0);}
+                for(byte[] pcm:frames){if(destroyed||carTest&&!CarModeState.active)throw new java.io.IOException("Teste encerrado.");byte[] decoded=codec.decodeFec(codec.encodeFec(pcm));if(!playPcm(decoded))throw new java.io.IOException("A reprodução de áudio local falhou. Confira volume e saída do Android.");emitAudioLevel("RX",decoded,selectedTalkgroup,0);}
                 Thread.sleep(250);
-                emit("audioTest",json("ok",true,"message",microphone?"Microfone gravado e reproduzido pelo vocoder, sem transmitir. Compare a voz com ganhos diferentes.":"Tom codificado, descodificado e enviado à saída local. Confirme se ouviu o tom; nenhum PTT foi enviado."));
+                emit("audioTest",json("ok",true,"message",microphone?"Microfone gravado e reproduzido localmente, sem transmitir. Entrada: "+CarAudio.observedInput+". Faça o teste físico para confirmar a origem da voz.":"Tom codificado, descodificado e enviado à saída local. Confirme se ouviu o tom; nenhum PTT foi enviado."));
             }catch(Exception error){emit("audioTest",json("ok",false,"message","Teste local: "+safeMessage(error)));}
-            finally{if(capture!=null){try{capture.stop();}catch(Exception ignored){}capture.release();}testingAudio.set(false);if(connected)controlsHandler.postDelayed(this::startVoxMonitor,700);else if(!sessionDesired)stopSelf();}
+            finally{emit("carMicTest",json("phase","finished","observedInput",CarAudio.observedInput));if(capture!=null){try{capture.stop();}catch(Exception ignored){}capture.release();}testingAudio.set(false);if(connected)controlsHandler.postDelayed(this::startVoxMonitor,700);else if(!sessionDesired)stopSelf();}
         },"ZapDMR-Audio-Test").start();
     }
 
@@ -975,5 +976,5 @@ public final class RadioSessionService extends Service {
         resetReceiveGuard();xlxAudioReceived=false;
     }
 
-    @Override public void onDestroy(){destroyed=true;boolean cleaned=false;try{for(android.media.ToneGenerator tone:activeTones)try{tone.release();}catch(Exception ignored){}activeTones.clear();BluetoothSppController.get(this).close();saveUsage(true);try{if(connectivity!=null)connectivity.unregisterNetworkCallback(networkCallback);}catch(Exception ignored){}android.media.AudioManager focusManager=(android.media.AudioManager)getSystemService(AUDIO_SERVICE);if(Build.VERSION.SDK_INT>=26&&focusRequest!=null)focusManager.abandonAudioFocusRequest(focusRequest);else focusManager.abandonAudioFocus(focusListener);audioFocusGranted=false;sessionDesired=false;selectionVersion++;resetReceiveGuard();linkWorker.shutdownNow();stopNetwork(false);controlsHandler.removeCallbacksAndMessages(null);if(mediaSession!=null)mediaSession.release();try{android.media.AudioManager audio=(android.media.AudioManager)getSystemService(AUDIO_SERVICE);if(Build.VERSION.SDK_INT>=31)audio.clearCommunicationDevice();else audio.stopBluetoothSco();audio.setMode(android.media.AudioManager.MODE_NORMAL);}catch(Exception ignored){}cleaned=true;}finally{current=null;running=false;stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy();if(quickExitRequest!=null){QuickExitState.complete();broadcastEvent("quickExitResult",json("requestId",quickExitRequest,"ok",cleaned,"message",cleaned?"Sessão encerrada.":"Não foi possível concluir a limpeza do rádio."));}}}
+    @Override public void onDestroy(){destroyed=true;boolean cleaned=false;try{try{CarAudio.release(this);}catch(Exception ignored){}for(android.media.ToneGenerator tone:activeTones)try{tone.release();}catch(Exception ignored){}activeTones.clear();BluetoothSppController.get(this).close();saveUsage(true);try{if(connectivity!=null)connectivity.unregisterNetworkCallback(networkCallback);}catch(Exception ignored){}android.media.AudioManager focusManager=(android.media.AudioManager)getSystemService(AUDIO_SERVICE);if(Build.VERSION.SDK_INT>=26&&focusRequest!=null)focusManager.abandonAudioFocusRequest(focusRequest);else focusManager.abandonAudioFocus(focusListener);audioFocusGranted=false;sessionDesired=false;selectionVersion++;resetReceiveGuard();linkWorker.shutdownNow();stopNetwork(false);controlsHandler.removeCallbacksAndMessages(null);if(mediaSession!=null)mediaSession.release();try{android.media.AudioManager audio=(android.media.AudioManager)getSystemService(AUDIO_SERVICE);if(Build.VERSION.SDK_INT>=31)audio.clearCommunicationDevice();else audio.stopBluetoothSco();audio.setMode(android.media.AudioManager.MODE_NORMAL);}catch(Exception ignored){}cleaned=true;}finally{current=null;running=false;stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy();if(quickExitRequest!=null){QuickExitState.complete();broadcastEvent("quickExitResult",json("requestId",quickExitRequest,"ok",cleaned,"message",cleaned?"Sessão encerrada.":"Não foi possível concluir a limpeza do rádio."));}}}
 }

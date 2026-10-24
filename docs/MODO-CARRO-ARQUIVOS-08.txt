@@ -1,0 +1,14 @@
+android/app/build.gradle
+android/app/src/carPreview/res/values/strings.xml
+android/app/src/main/java/br/radio/zapdmr/CarAudio.java
+android/app/src/main/java/br/radio/zapdmr/CarAudioTypes.java
+android/app/src/main/java/br/radio/zapdmr/CarModePlugin.java
+android/app/src/main/java/br/radio/zapdmr/RadioSessionService.java
+android/app/src/test/java/br/radio/zapdmr/CarAudioTypesTest.java
+docs/MODO-CARRO-PREVIEW-08.md
+docs/MODO-CARRO-RESULTADOS-08.md
+scripts/validation/car-entry08.test.cjs
+scripts/validation/car-ui.test.cjs
+web/car-launch.js
+web/car-mode.js
+web/index.html
