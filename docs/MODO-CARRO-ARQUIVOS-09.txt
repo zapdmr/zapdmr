@@ -1,0 +1,10 @@
+android/app/build.gradle
+android/app/src/carPreview/res/values/strings.xml
+docs/MODO-CARRO-PREVIEW-09.md
+docs/images/car-preview-09.png
+scripts/validation/car-entry09.test.cjs
+scripts/validation/car-ui.test.cjs
+web/car-launch.js
+web/car-mode.css
+web/car-mode.js
+web/index.html
