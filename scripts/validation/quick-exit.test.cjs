@@ -34,7 +34,7 @@ class Element{
  const service=fs.readFileSync('android/app/src/main/java/br/radio/zapdmr/RadioSessionService.java','utf8');
  const shutdown=service.slice(service.indexOf('if(ACTION_QUICK_EXIT.equals(action)){'),service.indexOf('if (ACTION_CONNECT.equals(action)) {'));
  assert(shutdown.includes('if(ptt.get()||txStopping)'));assert(shutdown.includes('sessionDesired=false;autoReconnect=false;'));assert(shutdown.includes('removeCallbacksAndMessages(null)'));assert(shutdown.includes('linkWorker.shutdownNow()'));assert(shutdown.includes('stopNetwork(true)'));assert(shutdown.includes('stopForeground(STOP_FOREGROUND_REMOVE)'));
- assert(service.includes('if(QuickExitState.blocked()){stopSelf();return START_NOT_STICKY;}'));assert(service.includes('if(!sessionDesired||QuickExitState.blocked())throw'));assert(service.includes('if(startupReceiveOnly||QuickExitState.blocked())return;'));
+ assert(service.includes('if(QuickExitState.blocked()){stopSelf();return START_NOT_STICKY;}'));assert(service.includes('if(!sessionDesired||QuickExitState.blocked())throw'));assert(service.includes('if(CarModeState.active||startupReceiveOnly||QuickExitState.blocked())return;'));
  const nativeBridge=fs.readFileSync('android/app/src/main/java/br/radio/zapdmr/MobileAudioPlugin.java','utf8');
  assert(nativeBridge.includes('"quickExitResult".equals(event)'));assert(nativeBridge.includes('exitRequest.equals(data.optString("requestId"))'));assert(nativeBridge.indexOf('if(!data.optBoolean("ok"))')<nativeBridge.indexOf('finishAndRemoveTask()'));assert(nativeBridge.includes('aprs.disconnect()'));
  assert(!/killProcess|System\.exit\(|Runtime\.getRuntime\(\)\.exit/.test(nativeBridge+service));

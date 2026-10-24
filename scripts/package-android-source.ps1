@@ -46,6 +46,6 @@ try {
     Add-SourceTree (Join-Path $projectRoot 'native\boost_1_88_0\boost') 'native/boost_1_88_0/boost'
     $boostLicense = Join-Path $projectRoot 'native\boost_1_88_0\LICENSE_1_0.txt'
     if (Test-Path -LiteralPath $boostLicense) { Add-SourceFile $boostLicense 'native/boost_1_88_0/LICENSE_1_0.txt' }
-    Add-SourceTree (Join-Path $projectRoot 'native\vocoder-android\vocoder-main\build-android-arm64-v8a\_deps\dynarmic-src') 'native/vocoder-android/dynarmic-source'
+    Add-SourceTree (Join-Path $projectRoot 'native\vocoder-android\dynarmic-source') 'native/vocoder-android/dynarmic-source'
 } finally { $archive.Dispose(); $stream.Dispose() }
 Write-Host "GPL corresponding source archive: $destination"

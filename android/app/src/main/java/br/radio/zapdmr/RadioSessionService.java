@@ -54,6 +54,7 @@ public final class RadioSessionService extends Service {
     private volatile boolean startupReceiveOnly;
     static final String ACTION_DISCONNECT = "br.radio.zapdmr.radio.DISCONNECT";
     static final String ACTION_UNLINK = "br.radio.zapdmr.radio.UNLINK";
+    static final String ACTION_CAR_REFRESH = "br.radio.zapdmr.radio.CAR_REFRESH";
     static final String ACTION_TUNE = "br.radio.zapdmr.radio.TUNE";
     static final String ACTION_TARGET = "br.radio.zapdmr.radio.TARGET";
     static final String ACTION_USAGE_RESET = "br.radio.zapdmr.radio.USAGE_RESET";
@@ -69,6 +70,7 @@ public final class RadioSessionService extends Service {
     static volatile boolean running;
     private static volatile RadioSessionService current;
     static boolean receptionBusy(){RadioSessionService service=current;if(service==null)return false;synchronized(service.receiveGuard){return service.receiveGuard.busy(android.os.SystemClock.elapsedRealtime());}}
+    static boolean carTargetMatches(int id,int slot){RadioSessionService service=current;return service!=null&&service.connected&&service.privateTargetId==0&&service.selectedTalkgroup==id&&service.selectedSlot==slot;}
     static boolean profileBusy(){RadioSessionService service=current;return service!=null&&(service.ptt.get()||service.txStopping||service.testingAudio.get());}
     private final ReceiveGuard receiveGuard=new ReceiveGuard();
     private volatile boolean txHeaderSent,txStopping;
@@ -79,7 +81,7 @@ public final class RadioSessionService extends Service {
         synchronized(receiveGuard){
             boolean selected=acceptVoice(source,destination,individual,slot);
             if(!connected||!selected||source==settings.optInt("dmrId"))return;
-            receiveGuard.configure(controls().optInt("rxProtectionMs",500));
+            receiveGuard.configure(CarModeState.active?Math.max(500,controls().optInt("rxProtectionMs",500)):controls().optInt("rxProtectionMs",500));
             if(end)receiveGuard.end(stream,android.os.SystemClock.elapsedRealtime());else receiveGuard.voice(stream,android.os.SystemClock.elapsedRealtime());
         }
         controlsHandler.post(guardRefresh);
@@ -291,7 +293,7 @@ public final class RadioSessionService extends Service {
                 if(key==null||!controls().optBoolean("bluetoothPtt")||!remoteAllowed())return false;
                 if(key.getKeyCode()!=android.view.KeyEvent.KEYCODE_HEADSETHOOK&&key.getKeyCode()!=android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE&&key.getKeyCode()!=android.view.KeyEvent.KEYCODE_MEDIA_PLAY)return false;
                 if(key.getRepeatCount()!=0)return true;
-                if(controls().optString("pttMode","toggle").equals("toggle")){if(key.getAction()==android.view.KeyEvent.ACTION_DOWN)togglePtt();}
+                if(!CarModeState.active&&controls().optString("pttMode","toggle").equals("toggle")){if(key.getAction()==android.view.KeyEvent.ACTION_DOWN)togglePtt();}
                 else if(key.getAction()==android.view.KeyEvent.ACTION_DOWN)startPtt(selectedTalkgroup,selectedSlot);else stopPtt();
                 return true;
             }
@@ -371,12 +373,20 @@ public final class RadioSessionService extends Service {
             emit("systemLogSnapshot",json("entries",RadioNotifications.snapshot()));
         } else if (ACTION_LOG.equals(action)) {
             emit("systemLog",RadioNotifications.record(intent.getStringExtra("category"),intent.getStringExtra("message")));
+        } else if (ACTION_CAR_REFRESH.equals(action)) {
+            if(CarModeState.active)stopVoxMonitor();
+            refreshCarAudioWhenIdle();
         } else if (ACTION_TUNE.equals(action)) {
+            String carRequest=intent.getStringExtra("carRequestId");
+            if(carRequest!=null&&(!CarModeState.active||!useOpenTerminal()||isXlx())){emit("carTuneResult",json("requestId",carRequest,"ok",false,"message","Scan requer sessão DMR ODTP."));return START_NOT_STICKY;}
+            if(carRequest!=null&&(ptt.get()||txStopping)){emit("carTuneResult",json("requestId",carRequest,"deferred",true));return START_NOT_STICKY;}
             // Selecting a destination is passive even for a custom TG 4000.
             // Only the explicit ACTION_UNLINK button may transmit that command.
             if(ptt.get()){emit("error",json("message","Termine a transmissão antes de trocar TG."));return START_NOT_STICKY;}
             if(isXlx()&&(intent.getIntExtra("talkgroupId",0)!=4003||intent.getIntExtra("slot",1)!=2)){emit("error",json("message","Este perfil utiliza TG 4003 · TS2."));return START_NOT_STICKY;}
             synchronized(receiveGuard){
+                if(carRequest!=null&&receiveGuard.busy(android.os.SystemClock.elapsedRealtime())){emit("carTuneResult",json("requestId",carRequest,"deferred",true));return START_NOT_STICKY;}
+                if(CarModeState.active)CarModeState.invalidate();
                 privateTargetId=0;selectionVersion++;
                 selectedTalkgroup = intent.getIntExtra("talkgroupId", 0);
                 selectedSlot = intent.getIntExtra("slot", 1) == 2 ? 2 : 1;
@@ -386,9 +396,11 @@ public final class RadioSessionService extends Service {
             releasePlayer();emitAudioLevel("RX",new byte[320],selectedTalkgroup,0);
             if(terminal!=null)try{terminal.select(selectedTalkgroup,false);}catch(Exception error){emit("error",json("message",safeMessage(error)));}
             stateMessage=useOpenTerminal()?"TG "+selectedTalkgroup+" — solicitando inscrição ODTP…":"Homebrew/HBP não oferece inscrição de TG sem PTT. Use ODTP num master compatível.";
+            if(carRequest!=null)emit("carTuneResult",json("requestId",carRequest,"ok",true,"talkgroupId",selectedTalkgroup,"slot",selectedSlot));
             emit("selection", statusData());emit("link",json("talkgroupId",selectedTalkgroup,"linked",false,"passive",true,"message",stateMessage));emitStatus();
             if(sessionDesired&&!connected&&(networkThread==null||!networkThread.isAlive()))connectHbp();
         } else if (ACTION_PTT_DOWN.equals(action)) {
+            if(intent.getBooleanExtra("carPointer",false)&&(!CarModeState.active||!CarModeState.pointerHeld))return START_NOT_STICKY;
             startPtt(intent.getIntExtra("talkgroupId", selectedTalkgroup), intent.getIntExtra("slot", selectedSlot));
         } else if (ACTION_PTT_UP.equals(action)) {
             stopPtt();
@@ -421,8 +433,10 @@ public final class RadioSessionService extends Service {
         return START_NOT_STICKY;
     }
     private boolean remoteAllowed(){android.app.KeyguardManager lock=(android.app.KeyguardManager)getSystemService(KEYGUARD_SERVICE);return controls().optBoolean("allowLocked")||lock==null||!lock.isKeyguardLocked();}
-    private void togglePtt(){if(ptt.get())stopPtt();else startPtt(selectedTalkgroup,selectedSlot);}
+    private void togglePtt(){if(ptt.get())stopPtt();else if(!CarModeState.active)startPtt(selectedTalkgroup,selectedSlot);}
+    private void refreshCarAudioWhenIdle(){if(destroyed)return;if(ptt.get()||txStopping||receptionBusy()){controlsHandler.postDelayed(this::refreshCarAudioWhenIdle,300);return;}try{releasePlayer();abandonRxFocus();bluetoothRoute=null;if(CarModeState.active)bluetoothAudioActive=CarAudio.configure(this);else{CarAudio.configure(this);configureBluetooth();}}catch(Exception error){emit("error",json("message","Rota de áudio: "+safeMessage(error)));}}
     private void configureBluetooth(){
+        if(CarModeState.active)return;
         boolean enabled=controls().optBoolean("bluetoothPtt");
         if(bluetoothRoute!=null&&bluetoothRoute==enabled)return;
         try{
@@ -441,7 +455,7 @@ public final class RadioSessionService extends Service {
     }
     private void stopVoxMonitor(){voxMonitor=false;AudioRecord audio=voxRecorder;if(audio!=null)try{audio.stop();}catch(Exception ignored){}}
     private void startVoxMonitor(){
-        if(startupReceiveOnly||QuickExitState.blocked())return;
+        if(CarModeState.active||startupReceiveOnly||QuickExitState.blocked())return;
         if(testingAudio.get()||pendingLinks.get()>0||voxMonitor||ptt.get()||!connected||!controls().optBoolean("voxEnabled")||!remoteAllowed()||ContextCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)return;
         voxMonitor=true;
         new Thread(() -> {
@@ -657,7 +671,8 @@ public final class RadioSessionService extends Service {
         }
     }
 
-    private void startPtt(int tg,int slot){try{beginPtt(tg,slot);}finally{emit("ptt",json("active",ptt.get(),"direction","TX"));}}
+    private void startPtt(int tg,int slot){
+        if(CarModeState.active&&(!CarModeState.allowsTx(tg,slot)||privateTargetId>0)){emit("error",json("message","Confirme explicitamente a TG de transmissão no Modo Carro."));return;}try{beginPtt(tg,slot);}finally{emit("ptt",json("active",ptt.get(),"direction","TX"));}}
     private void beginPtt(int tg, int slot) {
         if(QuickExitState.blocked())return;
         OpenTerminal receiver=terminal;
@@ -693,8 +708,8 @@ public final class RadioSessionService extends Service {
     private void armTot(long started){
         if(totCutoff!=null)controlsHandler.removeCallbacks(totCutoff);
         if(totWarning!=null)controlsHandler.removeCallbacks(totWarning);
-        boolean enabled=settings.optBoolean("totEnabled",true);
-        int limit=Math.max(30,Math.min(900,settings.optInt("totLimitSeconds",180)));
+        boolean enabled=CarModeState.active||settings.optBoolean("totEnabled",true);
+        int limit=CarModeState.active?180:Math.max(30,Math.min(900,settings.optInt("totLimitSeconds",180)));
         int warning=Math.max(0,Math.min(limit-1,settings.optInt("totWarningSeconds",10)));
         long elapsed=Math.max(0,System.currentTimeMillis()-started);
         if(enabled){
@@ -708,9 +723,9 @@ public final class RadioSessionService extends Service {
     private AudioRecord createRecorder() {
         int min=AudioRecord.getMinBufferSize(RATE,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT);
         int size=Math.max(FRAME_BYTES*4,min>0?min:FRAME_BYTES*4);
-        if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.M) return new AudioRecord.Builder().setAudioSource(MediaRecorder.AudioSource.VOICE_COMMUNICATION)
+        if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.M) { AudioRecord result=new AudioRecord.Builder().setAudioSource(MediaRecorder.AudioSource.VOICE_COMMUNICATION)
             .setAudioFormat(new AudioFormat.Builder().setSampleRate(RATE).setChannelMask(AudioFormat.CHANNEL_IN_MONO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
-            .setBufferSizeInBytes(size).build();
+            .setBufferSizeInBytes(size).build();CarAudio.input(this,result);return result;}
         return new AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION,RATE,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT,size);
     }
 
@@ -763,7 +778,7 @@ public final class RadioSessionService extends Service {
                 track=new AudioTrack.Builder().setAudioAttributes(rxAttributes())
                     .setAudioFormat(new AudioFormat.Builder().setSampleRate(RATE).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
                     .setBufferSizeInBytes(Math.max(FRAME_BYTES*8,min>0?min:FRAME_BYTES*8)).setTransferMode(AudioTrack.MODE_STREAM).build();
-                track.play();player=track;
+                CarAudio.output(this,track);track.play();player=track;
             }
             if(track.getPlayState()!=AudioTrack.PLAYSTATE_PLAYING)track.play();
             track.setVolume(1.0f);
@@ -900,6 +915,7 @@ public final class RadioSessionService extends Service {
 
     private void closeSocket(){DatagramSocket active=socket;socket=null;if(active!=null)active.close();}
     private void stopNetwork(boolean sendClose){
+        if(CarModeState.active)CarModeState.invalidate();
         stopVoxMonitor();stopPtt(); DatagramSocket active=socket;
         OpenTerminal client=terminal;if(client!=null){terminal=null;client.close();}
         if(!useOpenTerminal()&&sendClose&&active!=null&&connected){try{long id=Long.parseLong(settings.getString("dmrId")+settings.getString("essid"));ByteArrayOutputStream close=new ByteArrayOutputStream();close.write("RPTCL".getBytes(StandardCharsets.US_ASCII));writeInt(close,id);synchronized(socketLock){active.send(new DatagramPacket(close.toByteArray(),close.size()));usageTxBytes.addAndGet(close.size());if(isXlx()){byte[] legacy=java.util.Arrays.copyOf(close.toByteArray(),13);active.send(new DatagramPacket(legacy,legacy.length));usageTxBytes.addAndGet(legacy.length);}saveUsage(false);}}catch(Exception ignored){}}

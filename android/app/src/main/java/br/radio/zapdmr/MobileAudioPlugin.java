@@ -248,7 +248,7 @@ public final class MobileAudioPlugin extends Plugin {
 
             android.view.Window window=getActivity().getWindow();
 
-            if(options.optBoolean("keepScreenOn"))window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            if(CarModeState.active||options.optBoolean("keepScreenOn"))window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
             if(options.optBoolean("hideStatusBar"))window.addFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN);else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN);
 

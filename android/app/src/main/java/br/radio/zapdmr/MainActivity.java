@@ -12,7 +12,7 @@ public class MainActivity extends BridgeActivity {
             boolean media=code==android.view.KeyEvent.KEYCODE_HEADSETHOOK||code==android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE;
             boolean matches=(key.equals("VolumeUp")&&code==android.view.KeyEvent.KEYCODE_VOLUME_UP)||(key.equals("VolumeDown")&&code==android.view.KeyEvent.KEYCODE_VOLUME_DOWN)||(key.equals("F9")&&code==android.view.KeyEvent.KEYCODE_F9);
             if(RadioSessionService.running&&(matches||(media&&options.optBoolean("bluetoothPtt")))){
-                String mode=options.optString("pttMode","toggle");
+                String mode=CarModeState.active?"hold":options.optString("pttMode","toggle");
                 if(event.getRepeatCount()==0&&(event.getAction()==android.view.KeyEvent.ACTION_DOWN||mode.equals("hold"))){
                     String action=mode.equals("toggle")?RadioSessionService.ACTION_PTT_TOGGLE:event.getAction()==android.view.KeyEvent.ACTION_DOWN?RadioSessionService.ACTION_PTT_DOWN:RadioSessionService.ACTION_PTT_UP;
                     startService(new android.content.Intent(this,RadioSessionService.class).setAction(action));
@@ -31,6 +31,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(AttachmentsPlugin.class);
         registerPlugin(ChatPushPlugin.class);
         registerPlugin(AppUpdatePlugin.class);
+        registerPlugin(CarModePlugin.class);
         super.onCreate(savedInstanceState);
         if(!QuickExitState.open()){finishWhenRadioStops();return;}
         android.webkit.WebView webView=getBridge().getWebView();

@@ -1029,6 +1029,7 @@ document.querySelectorAll('[data-activity-filter]').forEach((button) => {
   };
 });
 $('#scanTalkgroups').onclick = async () => {
+  if(window.ZapDMRCarMode?.active())return window.ZapDMRCarMode.toggleScan();
   if (scanEnabled) return stopTalkgroupScan();
   if(changingProfile||window.ZapDMRQuickProfiles?.switching())return toast('Aguarde a troca de perfil.');
   if(isXlx())return toast('XLX026 utiliza módulo C fixo. Volte ao DMR para iniciar Scan.');

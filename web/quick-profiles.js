@@ -32,7 +32,7 @@
     document.getElementById('scanTalkgroups').disabled=isXlx()||busy||changingProfile;
     scan.disabled=isXlx()||busy||changingProfile;
   }
-  window.ZapDMRQuickProfiles={render,switching:()=>busy};
+  window.ZapDMRQuickProfiles={render,select:choose,switching:()=>busy};
   window.addEventListener('zapdmr:radio-event',event=>{if(['status','ptt','settings'].includes(event.detail?.event))render();});
   window.addEventListener('zapdmr:ready',render);render();
 })();

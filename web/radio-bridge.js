@@ -85,7 +85,7 @@
     if(event==='usage')ui.updateStatus({dataUsage:data});
     if(event==='sppStatus')ui.updateSpp(data);
     if(event==='sppLearned'){settings.operation={...settings.operation,...data.operation};await persist().catch(error=>toast(error.message));ui.updateSpp(data);ui.apply(settings);}
-    if(event==='hardwareScan'||event==='hardwareButton'&&data.action==='scan')$('#scanTalkgroups').click();
+    if((event==='hardwareScan'||event==='hardwareButton'&&data.action==='scan')&&!window.ZapDMRCarMode?.active())$('#scanTalkgroups').click();
     if(event==='hardwareButton'&&data.action!=='scan'){const on=data.action==='pttDown'?true:data.action==='pttUp'?false:!(gatewayStatus.pttArmed||mobilePttActive);void window.ZapDMROperation?.requestPtt(on);}
     if(event==='systemLog')ui.log(data);
     if(event==='systemLogSnapshot')for(const entry of data.entries||[])ui.log(entry);

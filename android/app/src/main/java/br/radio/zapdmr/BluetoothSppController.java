@@ -200,6 +200,7 @@ final class BluetoothSppController {
         if (token.equals(bindings.optString("pttDown"))) {
             if (remoteAllowed(true) && !serialPttHeld) { serialPttHeld = true; dispatch(RadioSessionService.ACTION_PTT_DOWN); hardwareInput("pttDown",token); }
         } else if (token.equals(bindings.optString("pttToggle"))) {
+            if(CarModeState.active){releasePtt();return;}
             if (remoteAllowed(true) && now - lastInputAt > 250) { serialPttHeld = !serialPttHeld; dispatch(RadioSessionService.ACTION_PTT_TOGGLE); hardwareInput("pttToggle",token); }
         } else if (token.equals(bindings.optString("scan")) && now - lastInputAt > 250) { emit("hardwareScan", json("source", "spp", "token", token)); hardwareInput("scan",token); }
         lastInputAt = now;
