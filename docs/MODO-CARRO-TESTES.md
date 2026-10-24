@@ -33,3 +33,5 @@ Passaram: car-scan.test.cjs, car-ui.test.cjs, open-terminal.test.cjs, xlx-sessio
 9. Fechar/reabrir e conferir preferências. Atualizar somente o pacote de teste com mesma assinatura e comparar dados. Conferir que o aplicativo normal e os arquivos estáveis permaneceram intactos.
 
 Não foi realizado teste em aparelho Android, Bluetooth físico, veículo ou rede de rádio real nesta etapa. ADB não apresentava dispositivo acessível. Nenhuma promessa de Android Auto ou homologação física.
+
+Refinamento: repetidos os testes car-ui e car-scan. O harness também verifica mostrar/ocultar favoritos, abertura do seletor rápido e reconectar sem iniciar TX, invalidando o destino confirmado. Revisão visual local do seletor e painel circular. Teste físico continua pendente.

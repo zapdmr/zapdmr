@@ -25,3 +25,6 @@ SPP reutiliza o controlador existente, exigindo comandos distintos de pressionar
 Execute `scripts/build-car-preview.ps1`. APK e SHA256 em `release/car-preview/`. Testes de scanner/UI em `scripts/validation/car-*.test.cjs`; estado nativo em CarModeStateTest. Fontes GPL correspondentes acompanham o APK.
 
 Ver também MODO-CARRO-TESTES.md, ANDROID-AUTO-VIABILIDADE.md e MODO-CARRO-ARQUIVOS.txt.
+
+## Refinamento visual da candidata
+Painel com PTT circular momentâneo, indicador vermelho durante TX, atalhos Favoritos, TG rápida e Reconectar. Modo normal sempre acessível. TG rápida usa a seleção existente, bloqueia troca durante RX/TX e invalida a confirmação do destino. Reconectar reutiliza as credenciais protegidas do perfil e nunca inicia PTT. Todos os estilos ficam limitados ao Modo Carro.
