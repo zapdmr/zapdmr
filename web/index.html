@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="pt-BR">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#128c55"><title>ZapDMR</title>
   <link rel="icon" href="/ZapDMR.png"><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/radio-console.css"><link rel="stylesheet" href="/community.css"><link rel="stylesheet" href="/car-mode.css">
 </head>
@@ -18,7 +18,7 @@
         <section class="card operation-card">
           <div class="heading"><div><p class="kicker">OPERAÇÃO DE VOZ</p><h2 id="pttScreenTitle">TalkGroup ativa</h2></div><button id="favoriteSelected" class="star" type="button" title="Favoritar">☆</button></div>
           <div class="selected"><i id="selectedActivityLed" class="activity-led" aria-label="Sem tráfego recente"></i><strong id="selectedId">TG 724</strong><div><b id="selectedName">Brasil Nacional</b><small id="selectedMeta">TS 1</small><small id="selectedCaller" class="activity-caller"></small></div><span id="selectedCategory" class="pill">Nacional</span></div>
-          <button id="pttScan" class="passive-scan-card" type="button" aria-pressed="false"><span>◉ Recepção</span><b id="pttScanLabel">A procurar… · iniciar Scan</b><small>ODTP solicita inscrição sem áudio de ativação. O estado depende da resposta do servidor.</small></button>
+          <button id="pttScan" title="SCAN: toque para iniciar ou parar. A faixa mostra o estado da recepção." class="passive-scan-card" type="button" aria-pressed="false"><span>◉ SCAN</span><b id="pttScanLabel">A procurar… · iniciar Scan</b><small>ODTP solicita inscrição sem áudio de ativação. O estado depende da resposta do servidor.</small></button>
           <div class="quick-talkgroup-catalog"><nav id="quickCatalogFilters" class="quick-catalog-filters" aria-label="Filtrar lista rápida de TalkGroups"><button type="button" data-quick-catalog-filter="all" class="active" aria-pressed="true">Todas</button><button type="button" data-quick-catalog-filter="national" aria-pressed="false" title="TalkGroups nacionais, incluindo regiões e estados brasileiros">Nacionais</button><button type="button" data-quick-catalog-filter="world" aria-pressed="false">Mundiais</button></nav><label class="quick-talkgroup">Sintonizar TalkGroup<button id="quickTalkgroupSelect" class="quick-talkgroup-control" type="button" aria-haspopup="dialog" aria-controls="quickTalkgroupDialog" aria-label="Selecionar TalkGroup ativa" aria-describedby="quickCatalogHint">TG 724 · Brasil Nacional</button></label><small id="quickCatalogHint" class="quick-catalog-hint">🟢 atividade recente · 🔴 sem atividade recente. Filtrar a lista não muda a TG atual.</small></div>
           <button id="ptt" class="button ptt ptt-large" type="button" disabled>🎙 Preparar PTT</button>
           <div id="audioMeters" class="audio-meter" aria-label="Medidores de modulação">
