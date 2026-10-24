@@ -19,10 +19,11 @@ public final class CarModePlugin extends Plugin {
     private BroadcastReceiver receiver;private AudioDeviceCallback deviceCallback;
     private PluginCall tuneCall;private String tuneId;
     private String outputName="",inputName="";private int outputType,inputType;private boolean priorKeepAwake;
-    private final Runnable watchdog=new Runnable(){public void run(){if(CarModeState.expired(SystemClock.elapsedRealtime()))releasePointer();if(CarModeState.active)handler.postDelayed(this,250);}};
+    private final Runnable watchdog=new Runnable(){public void run(){if(CarModeState.expired(SystemClock.elapsedRealtime()))releasePointer();if(CarModeState.voxArmed&&!CarModeState.voxLeaseValid(SystemClock.elapsedRealtime()))disableVox("Interface sem resposta; VOX desligado.");if(CarModeState.active)handler.postDelayed(this,250);}};
     private boolean bluetoothAllowed(){return Build.VERSION.SDK_INT<31||ContextCompat.checkSelfPermission(getContext(),Manifest.permission.BLUETOOTH_CONNECT)==PackageManager.PERMISSION_GRANTED;}
     private AudioManager audio(){return (AudioManager)getContext().getSystemService(Context.AUDIO_SERVICE);}
     private void command(String action){if(RadioSessionService.running)getContext().startService(new Intent(getContext(),RadioSessionService.class).setAction(action));}
+    private void disableVox(String reason){CarModeState.disarmVox();if(RadioSessionService.running)getContext().startService(new Intent(getContext(),RadioSessionService.class).setAction(RadioSessionService.ACTION_CAR_VOX).putExtra("enabled",false).putExtra("reason",reason));}
     private void releasePointer(){CarModeState.pointer(false,SystemClock.elapsedRealtime());command(RadioSessionService.ACTION_PTT_UP);}
     @Override public void load(){
         android.content.SharedPreferences saved=getContext().getSharedPreferences("zapdmr_car_routes",Context.MODE_PRIVATE);outputName=saved.getString("outputName","");inputName=saved.getString("inputName","");outputType=saved.getInt("outputType",0);inputType=saved.getInt("inputType",0);
@@ -34,31 +35,39 @@ public final class CarModePlugin extends Plugin {
             }
             if(!bluetoothAllowed())return;
             BluetoothDevice device=intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
-            if(device!=null)try{boolean connected=BluetoothDevice.ACTION_ACL_CONNECTED.equals(intent.getAction());notifyListeners("bluetooth",new JSObject().put("address",device.getAddress()).put("name",device.getName()).put("connected",connected));if(!connected&&CarModeState.pointerHeld)releasePointer();}catch(SecurityException ignored){}
+            if(device!=null)try{boolean connected=BluetoothDevice.ACTION_ACL_CONNECTED.equals(intent.getAction());notifyListeners("bluetooth",new JSObject().put("address",device.getAddress()).put("name",device.getName()).put("connected",connected));if(!connected){if(CarModeState.voxArmed)disableVox("Bluetooth desconectado; VOX suspenso.");if(CarModeState.pointerHeld)releasePointer();}}catch(SecurityException ignored){}
         }};
         IntentFilter filter=new IntentFilter(RadioSessionService.ACTION_EVENT);filter.addAction(BluetoothDevice.ACTION_ACL_CONNECTED);filter.addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED);
         ContextCompat.registerReceiver(getContext(),receiver,filter,ContextCompat.RECEIVER_EXPORTED);
         // RadioSessionService events are package-scoped; tune request IDs are random and single-flight.
-        deviceCallback=new AudioDeviceCallback(){@Override public void onAudioDevicesAdded(AudioDeviceInfo[] devices){restoreRoute();notifyDevices();}@Override public void onAudioDevicesRemoved(AudioDeviceInfo[] devices){if(CarModeState.active){releasePointer();command(RadioSessionService.ACTION_PTT_UP);}notifyDevices();}};
+        deviceCallback=new AudioDeviceCallback(){@Override public void onAudioDevicesAdded(AudioDeviceInfo[] devices){restoreRoute();notifyDevices();}@Override public void onAudioDevicesRemoved(AudioDeviceInfo[] devices){if(CarModeState.active){if(CarModeState.voxArmed)disableVox("Dispositivo de áudio removido; VOX suspenso.");releasePointer();command(RadioSessionService.ACTION_PTT_UP);}notifyDevices();}};
         audio().registerAudioDeviceCallback(deviceCallback,handler);
     }
-    private void restoreRoute(){if(!CarModeState.active)return;int outputs=0,inputs=0,newOutput=0,newInput=0;for(AudioDeviceInfo d:audio().getDevices(AudioManager.GET_DEVICES_ALL)){if(d.isSink()&&d.getType()==outputType&&d.getProductName().toString().equals(outputName)){outputs++;newOutput=d.getId();}if(d.isSource()&&d.getType()==inputType&&d.getProductName().toString().equals(inputName)){inputs++;newInput=d.getId();}}if(outputs==1)CarModeState.outputId=newOutput;if(inputs==1)CarModeState.inputId=newInput;command(RadioSessionService.ACTION_CAR_REFRESH);}
+    private void restoreRoute(){if(!CarModeState.active)return;if(CarModeState.voxArmed)disableVox("Dispositivos de áudio mudaram; VOX desligado para nova calibração.");int outputs=0,inputs=0,newOutput=0,newInput=0;for(AudioDeviceInfo d:audio().getDevices(AudioManager.GET_DEVICES_ALL)){if(d.isSink()&&d.getType()==outputType&&d.getProductName().toString().equals(outputName)){outputs++;newOutput=d.getId();}if(d.isSource()&&d.getType()==inputType&&d.getProductName().toString().equals(inputName)){inputs++;newInput=d.getId();}}if(outputs==1)CarModeState.outputId=newOutput;if(inputs==1)CarModeState.inputId=newInput;command(RadioSessionService.ACTION_CAR_REFRESH);}
     private void notifyDevices(){try{notifyListeners("devices",snapshot());}catch(Exception ignored){}}
     private JSObject snapshot() throws Exception {
         JSArray outputs=new JSArray(),inputs=new JSArray(),paired=new JSArray();
         for(AudioDeviceInfo d:audio().getDevices(AudioManager.GET_DEVICES_ALL)){JSObject item=new JSObject().put("id",d.getId()).put("name",d.getProductName().toString()).put("type",d.getType());if(d.isSink())outputs.put(item);if(d.isSource())inputs.put(item);}
         if(bluetoothAllowed()){BluetoothManager manager=(BluetoothManager)getContext().getSystemService(Context.BLUETOOTH_SERVICE);BluetoothAdapter adapter=manager==null?null:manager.getAdapter();if(adapter!=null)for(BluetoothDevice device:adapter.getBondedDevices())paired.put(new JSObject().put("address",device.getAddress()).put("name",device.getName()==null?"Bluetooth":device.getName()));}
-        return new JSObject().put("outputs",outputs).put("inputs",inputs).put("paired",paired).put("bluetoothPermission",bluetoothAllowed()).put("active",CarModeState.active).put("observedOutput",CarAudio.observedOutput).put("observedInput",CarAudio.observedInput).put("outputId",CarModeState.outputId).put("inputId",CarModeState.inputId);
+        return new JSObject().put("outputs",outputs).put("inputs",inputs).put("paired",paired).put("bluetoothPermission",bluetoothAllowed()).put("active",CarModeState.active).put("observedOutput",CarAudio.observedOutput).put("observedInput",CarAudio.observedInput).put("outputId",CarModeState.outputId).put("inputId",CarModeState.inputId).put("voxArmed",CarModeState.voxArmed).put("vadAvailable",WebRtcVad.available());
     }
     @PluginMethod public void devices(PluginCall call){try{call.resolve(snapshot());}catch(Exception error){call.reject("Não foi possível consultar os dispositivos de áudio/Bluetooth.");}}
     @PluginMethod public void setActive(PluginCall call){
         if(RadioSessionService.profileBusy()){call.reject("Encerre a transmissão ou teste antes de trocar de interface.");return;}
         getActivity().runOnUiThread(()->{boolean enable=Boolean.TRUE.equals(call.getBoolean("active",false));
         if(enable&&!CarModeState.active)priorKeepAwake=(getActivity().getWindow().getAttributes().flags&android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)!=0;
-        CarModeState.txGainPercent=Math.max(0,Math.min(260,call.getInt("txGainPercent",130)));CarModeState.keepScreenOn=Boolean.TRUE.equals(call.getBoolean("keepScreenOn",true));CarModeState.mode(enable);CarModeState.visible=true;if(enable){applyScreen();restoreRoute();}else if(!priorKeepAwake)getActivity().getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);handler.removeCallbacks(watchdog);if(CarModeState.active)handler.post(watchdog);command(RadioSessionService.ACTION_CAR_REFRESH);call.resolve(new JSObject().put("active",CarModeState.active));});
+        CarModeState.txGainPercent=Math.max(0,Math.min(300,call.getInt("txGainPercent",260)));CarModeState.keepScreenOn=Boolean.TRUE.equals(call.getBoolean("keepScreenOn",true));CarModeState.mode(enable);CarModeState.visible=true;if(enable){applyScreen();restoreRoute();}else if(!priorKeepAwake)getActivity().getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);handler.removeCallbacks(watchdog);if(CarModeState.active)handler.post(watchdog);command(RadioSessionService.ACTION_CAR_REFRESH);call.resolve(new JSObject().put("active",CarModeState.active));});
     }
     private void applyScreen(){getActivity().runOnUiThread(()->{if(CarModeState.active&&CarModeState.visible&&CarModeState.keepScreenOn)getActivity().getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);else getActivity().getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);});}
-    @PluginMethod public void txGain(PluginCall call){if(!CarModeState.active||RadioSessionService.profileBusy()){call.reject("Termine a transmissão ou teste antes de ajustar o ganho.");return;}CarModeState.txGainPercent=Math.max(0,Math.min(260,call.getInt("percent",130)));call.resolve(new JSObject().put("percent",CarModeState.txGainPercent));}
+    @PluginMethod public void txGain(PluginCall call){if(!CarModeState.active||RadioSessionService.profileBusy()){call.reject("Termine a transmissão ou teste antes de ajustar o ganho.");return;}CarModeState.txGainPercent=Math.max(0,Math.min(300,call.getInt("percent",260)));call.resolve(new JSObject().put("percent",CarModeState.txGainPercent));}
+    @PluginMethod public void vox(PluginCall call){
+        boolean enabled=Boolean.TRUE.equals(call.getBoolean("enabled",false));if(!enabled){disableVox("VOX desligado pelo operador.");call.resolve(new JSObject().put("armed",false));return;}
+        if(!CarModeState.active||!CarModeState.visible||RadioSessionService.profileBusy()||RadioSessionService.receptionBusy()||!RadioSessionService.carTargetMatches(CarModeState.confirmedTarget,CarModeState.confirmedSlot)||!WebRtcVad.available()){call.reject("Confirme a TG, aguarde RX/TX terminar e use uma versão com VAD disponível.");return;}
+        if(ContextCompat.checkSelfPermission(getContext(),Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){call.reject("Autorize o microfone para ativar VOX.");return;}
+        CarModeState.voxSensitivity=Math.max(0,Math.min(2,call.getInt("sensitivity",1)));CarModeState.voxHangMs=Math.max(400,Math.min(3000,call.getInt("hangMs",1200)));CarModeState.armVox(SystemClock.elapsedRealtime());
+        getContext().startService(new Intent(getContext(),RadioSessionService.class).setAction(RadioSessionService.ACTION_CAR_VOX).putExtra("enabled",true));call.resolve(new JSObject().put("armed",true));
+    }
+    @PluginMethod public void voxHeartbeat(PluginCall call){if(CarModeState.active&&CarModeState.visible&&CarModeState.voxArmed)CarModeState.voxTick=SystemClock.elapsedRealtime();call.resolve();}
     @PluginMethod public void screenPreference(PluginCall call){CarModeState.keepScreenOn=Boolean.TRUE.equals(call.getBoolean("enabled",true));if(CarModeState.active)applyScreen();call.resolve();}
     @Override protected void handleOnResume(){CarModeState.visible=true;if(CarModeState.active)applyScreen();}
     @PluginMethod public void confirmTarget(PluginCall call){
@@ -94,6 +103,6 @@ public final class CarModePlugin extends Plugin {
     @PluginMethod public void tone(PluginCall call){
         if(!RadioSessionService.profileBusy()&&!RadioSessionService.receptionBusy()){ToneGenerator tone=new ToneGenerator(AudioManager.STREAM_NOTIFICATION,18);tone.startTone(ToneGenerator.TONE_PROP_BEEP,65);handler.postDelayed(tone::release,120);}call.resolve();
     }
-    @Override protected void handleOnPause(){if(CarModeState.pointerHeld)releasePointer();CarModeState.visible=false;if(CarModeState.active)applyScreen();}
-    @Override protected void handleOnDestroy(){releasePointer();handler.removeCallbacksAndMessages(null);if(receiver!=null)try{getContext().unregisterReceiver(receiver);}catch(Exception ignored){}if(deviceCallback!=null)audio().unregisterAudioDeviceCallback(deviceCallback);CarModeState.mode(false);command(RadioSessionService.ACTION_CAR_REFRESH);}
+    @Override protected void handleOnPause(){if(CarModeState.voxArmed)disableVox("Aplicativo em segundo plano; reative o VOX ao voltar.");if(CarModeState.pointerHeld)releasePointer();CarModeState.visible=false;if(CarModeState.active)applyScreen();}
+    @Override protected void handleOnDestroy(){disableVox("Aplicativo encerrado; VOX desligado.");releasePointer();handler.removeCallbacksAndMessages(null);if(receiver!=null)try{getContext().unregisterReceiver(receiver);}catch(Exception ignored){}if(deviceCallback!=null)audio().unregisterAudioDeviceCallback(deviceCallback);CarModeState.mode(false);command(RadioSessionService.ACTION_CAR_REFRESH);}
 }

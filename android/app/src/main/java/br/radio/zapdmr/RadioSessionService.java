@@ -54,6 +54,7 @@ public final class RadioSessionService extends Service {
     private volatile boolean startupReceiveOnly;
     static final String ACTION_DISCONNECT = "br.radio.zapdmr.radio.DISCONNECT";
     static final String ACTION_UNLINK = "br.radio.zapdmr.radio.UNLINK";
+    static final String ACTION_CAR_VOX = "br.radio.zapdmr.radio.CAR_VOX";
     static final String ACTION_CAR_REFRESH = "br.radio.zapdmr.radio.CAR_REFRESH";
     static final String ACTION_TUNE = "br.radio.zapdmr.radio.TUNE";
     static final String ACTION_TARGET = "br.radio.zapdmr.radio.TARGET";
@@ -330,7 +331,7 @@ public final class RadioSessionService extends Service {
                 settings = new JSONObject(intent.getStringExtra("settings") == null ? "{}" : intent.getStringExtra("settings"));
                 configureBluetooth();BluetoothSppController.get(this).configure(controls());
                 mediaSession.setActive(controls().optBoolean("bluetoothPtt"));
-                if((controls().optBoolean("allowLocked")||controls().optBoolean("voxEnabled"))&&ContextCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED)
+                if((controls().optBoolean("allowLocked")||controls().optBoolean("voxEnabled")||CarModeState.voxArmed)&&ContextCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED)
                     startForegroundCompat(NOTIFICATION_ID,notification("A iniciar escuta passiva…"),ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE|ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
                 password = intent.getStringExtra("password") == null ? "" : intent.getStringExtra("password");
                 autoReconnect = intent.getBooleanExtra("autoReconnect", false);
@@ -373,6 +374,11 @@ public final class RadioSessionService extends Service {
             emit("systemLogSnapshot",json("entries",RadioNotifications.snapshot()));
         } else if (ACTION_LOG.equals(action)) {
             emit("systemLog",RadioNotifications.record(intent.getStringExtra("category"),intent.getStringExtra("message")));
+        } else if (ACTION_CAR_VOX.equals(action)) {
+            if(!intent.getBooleanExtra("enabled",false)){stopCarVox(intent.getStringExtra("reason")==null?"VOX desligado.":intent.getStringExtra("reason"));return START_NOT_STICKY;}
+            if(!carVoxReady()){stopCarVox("Confirme o destino e a ligação antes de ativar o VOX.");return START_NOT_STICKY;}
+            carVoxGate=new CarVoxGate(CarModeState.voxSensitivity,CarModeState.voxHangMs);carVoxConfiguredGeneration=CarModeState.voxGeneration;carVoxLastState="";carVoxInputId=0;
+            try{startForegroundCompat(NOTIFICATION_ID,notification("VOX experimental · microfone em escuta"),ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE|ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);startCarVoxMonitor();}catch(Exception error){stopCarVox("Não foi possível iniciar escuta VOX: "+safeMessage(error));}
         } else if (ACTION_CAR_REFRESH.equals(action)) {
             if(CarModeState.active)stopVoxMonitor();
             refreshCarAudioWhenIdle();
@@ -419,8 +425,8 @@ public final class RadioSessionService extends Service {
                 configureBluetooth();BluetoothSppController.get(this).configure(controls());
                 mediaSession.setActive(controls().optBoolean("bluetoothPtt"));
                 if(ptt.get())armTot(pttStartedAt);
-                if(!controls().optBoolean("voxEnabled")){stopVoxMonitor();if(voxTransmitting)stopPtt();}else startVoxMonitor();
-                if(connected&&(controls().optBoolean("allowLocked")||controls().optBoolean("voxEnabled"))&&ContextCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED)
+                if(CarModeState.active){startCarVoxMonitor();}else if(!controls().optBoolean("voxEnabled")){stopVoxMonitor();if(voxTransmitting)stopPtt();}else startVoxMonitor();
+                if(connected&&(controls().optBoolean("allowLocked")||controls().optBoolean("voxEnabled")||CarModeState.voxArmed)&&ContextCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED)
                     startForegroundCompat(NOTIFICATION_ID,notification("Escuta passiva · PTT pronto"),ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE|ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
                 emitStatus();
             } catch(Exception error){emit("error",json("message","Não foi possível aplicar as opções de rádio: "+safeMessage(error)));}
@@ -454,7 +460,42 @@ public final class RadioSessionService extends Service {
         }catch(Exception error){Log.w(TAG,"Rota Bluetooth indisponível",error);}
     }
     private void stopVoxMonitor(){voxMonitor=false;AudioRecord audio=voxRecorder;if(audio!=null)try{audio.stop();}catch(Exception ignored){}}
+    private volatile boolean carVoxTransmitting;
+    private volatile CarVoxGate carVoxGate;private volatile long carVoxMonitorGeneration=-1,carVoxConfiguredGeneration=-1;private volatile int carVoxInputId;private final Runnable carVoxRetry=this::startCarVoxMonitor;
+    private String carVoxLastState="";
+    private volatile boolean carEchoEffect,carNoiseEffect;
+    private boolean carVoxReady(){return CarModeState.active&&CarModeState.visible&&CarModeState.voxArmed&&CarModeState.voxLeaseValid(android.os.SystemClock.elapsedRealtime())&&connected&&!destroyed&&!QuickExitState.blocked()&&privateTargetId==0&&CarModeState.allowsTx(selectedTalkgroup,selectedSlot)&&!testingAudio.get()&&pendingLinks.get()==0&&!linking.get()&&remoteAllowed()&&ContextCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED;}
+    private void carVoxStatus(String phase,String message){if(phase.equals(carVoxLastState))return;carVoxLastState=phase;emit("carVox",json("armed",CarModeState.voxArmed,"state",phase,"transmitting",carVoxTransmitting&&ptt.get(),"message",message,"aecEnabled",carEchoEffect,"noiseSuppressionEnabled",carNoiseEffect));}
+    private void stopCarVox(String reason){stopCarVox(reason,-1);}
+    private void stopCarVox(String reason,long generation){if(generation>=0){if(!CarModeState.disarmVox(generation))return;}else CarModeState.disarmVox();stopVoxMonitor();if(carVoxTransmitting)stopPtt();carVoxTransmitting=false;carVoxStatus("OFF",reason);}
+    private void startCarVoxMonitor(){
+        if(!CarModeState.voxArmed||carVoxConfiguredGeneration!=CarModeState.voxGeneration||ptt.get()||txStopping)return;if(voxMonitor&&carVoxMonitorGeneration==CarModeState.voxGeneration)return;if(voxMonitor||voxRecorder!=null){controlsHandler.removeCallbacks(carVoxRetry);controlsHandler.postDelayed(carVoxRetry,200);return;}controlsHandler.removeCallbacks(carVoxRetry);
+        if(!carVoxReady()){stopCarVox("VOX suspenso: ligação, destino, permissão ou tela indisponível. Ative novamente quando estiver seguro.");return;}
+        if(carVoxGate==null)carVoxGate=new CarVoxGate(CarModeState.voxSensitivity,CarModeState.voxHangMs);
+        final long generation=CarModeState.voxGeneration;final CarVoxGate gate=carVoxGate;carVoxMonitorGeneration=generation;voxMonitor=true;
+        new Thread(()->{AudioRecord audio=null;CarVoxEffects effects=null;boolean trigger=false;
+            try(WebRtcVad detector=new WebRtcVad(gate.mode())){
+                audio=createRecorder();voxRecorder=audio;effects=new CarVoxEffects(audio);carEchoEffect=effects.echo;carNoiseEffect=effects.noise;
+                audio.startRecording();long routeDeadline=android.os.SystemClock.elapsedRealtime()+1500;short[] samples=new short[160];carVoxStatus("CALIBRATING","VOX: faça silêncio por um instante para calibrar o ruído.");
+                while(voxMonitor&&!ptt.get()&&carVoxReady()&&generation==CarModeState.voxGeneration){
+                    int got=0;while(got<160&&voxMonitor){int count=audio.read(samples,got,160-got);if(count<=0)throw new java.io.IOException("Microfone VOX indisponível.");got+=count;}if(got!=160)break;
+                    android.media.AudioDeviceInfo route=audio.getRoutedDevice();if(route==null){if(android.os.SystemClock.elapsedRealtime()>routeDeadline){stopCarVox("Microfone sem rota confirmada; VOX suspenso.");break;}continue;}if((CarModeState.inputId>0&&route.getId()!=CarModeState.inputId)||(carVoxInputId>0&&route.getId()!=carVoxInputId)){stopCarVox("Microfone mudou; VOX suspenso para novo teste.");break;}carVoxInputId=route.getId();
+                    boolean busy=receptionBusy();CarVoxGate.Result result=gate.frame(detector.speech(samples),CarVoxGate.db(samples),CarVoxGate.zcr(samples),!busy,false,android.os.SystemClock.elapsedRealtime());
+                    if(result==CarVoxGate.Result.UNSAFE){stopCarVox(gate.reason());break;}
+                    if(result==CarVoxGate.Result.START){trigger=true;break;}
+                    if(result==CarVoxGate.Result.RX_BLOCKED)carVoxStatus("RX_BLOCKED","VOX bloqueado durante RX e proteção contra eco.");
+                    else if(result==CarVoxGate.Result.CALIBRATING)carVoxStatus("CALIBRATING","Faça silêncio para calibrar; falar não inicia TX nesta fase.");
+                    else if(result==CarVoxGate.Result.READY)carVoxStatus("LISTENING","VOX pronto: aguardando voz. Use PARAR VOX para voltar ao PTT manual.");
+                }
+            }catch(Exception error){if(CarModeState.voxArmed&&generation==CarModeState.voxGeneration)stopCarVox("VOX suspenso: "+safeMessage(error),generation);}
+            finally{if(effects!=null)effects.close();if(audio!=null){try{audio.stop();}catch(Exception ignored){}audio.release();}voxRecorder=null;voxMonitor=false;}
+            if(trigger)controlsHandler.post(()->{if(generation!=CarModeState.voxGeneration)return;if(!carVoxReady()){stopCarVox("VOX suspenso: condição de segurança indisponível.",generation);return;}if(receptionBusy()){gate.blocked(android.os.SystemClock.elapsedRealtime());controlsHandler.postDelayed(carVoxRetry,500);return;}carVoxTransmitting=true;startPtt(selectedTalkgroup,selectedSlot);if(ptt.get())carVoxStatus("TRANSMITTING","Transmitindo por voz · toque em PARAR VOX para interromper.");else{carVoxTransmitting=false;gate.blocked(android.os.SystemClock.elapsedRealtime());controlsHandler.postDelayed(this::startCarVoxMonitor,700);}});
+            else if(CarModeState.voxArmed&&generation==CarModeState.voxGeneration&&!carVoxReady())controlsHandler.post(()->stopCarVox("VOX suspenso: condição de segurança indisponível.",generation));
+        },"ZapDMR-Car-WebRTC-VOX").start();
+    }
+
     private void startVoxMonitor(){
+        if(CarModeState.active){startCarVoxMonitor();return;}
         if(CarModeState.active||startupReceiveOnly||QuickExitState.blocked())return;
         if(testingAudio.get()||pendingLinks.get()>0||voxMonitor||ptt.get()||!connected||!controls().optBoolean("voxEnabled")||!remoteAllowed()||ContextCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)return;
         voxMonitor=true;
@@ -672,6 +713,7 @@ public final class RadioSessionService extends Service {
     }
 
     private void startPtt(int tg,int slot){
+        if(CarModeState.active&&CarModeState.voxArmed&&!carVoxTransmitting)stopCarVox("VOX desligado pelo PTT manual.");
         if(CarModeState.active&&(!CarModeState.allowsTx(tg,slot)||privateTargetId>0)){emit("error",json("message","Confirme explicitamente a TG de transmissão no Modo Carro."));return;}try{beginPtt(tg,slot);}finally{emit("ptt",json("active",ptt.get(),"direction","TX"));}}
     private void beginPtt(int tg, int slot) {
         if(QuickExitState.blocked())return;
@@ -709,11 +751,11 @@ public final class RadioSessionService extends Service {
         if(totCutoff!=null)controlsHandler.removeCallbacks(totCutoff);
         if(totWarning!=null)controlsHandler.removeCallbacks(totWarning);
         boolean enabled=CarModeState.active||settings.optBoolean("totEnabled",true);
-        int limit=Math.max(30,Math.min(900,settings.optInt("totLimitSeconds",180)));
+        int limit=Math.max(30,Math.min(CarModeState.active?180:900,settings.optInt("totLimitSeconds",180)));
         int warning=Math.max(0,Math.min(limit-1,settings.optInt("totWarningSeconds",10)));
         long elapsed=Math.max(0,System.currentTimeMillis()-started);
         if(enabled){
-            totCutoff=()->{voxNeedsSilence=true;stopPtt();emit("tot",json("active",false,"expired",true));};
+            totCutoff=()->{if(carVoxTransmitting){CarModeState.disarmVox();carVoxStatus("OFF","VOX suspenso pelo TOT; reative manualmente.");}voxNeedsSilence=true;stopPtt();emit("tot",json("active",false,"expired",true));};
             controlsHandler.postDelayed(totCutoff,Math.max(0,limit*1000L-elapsed));
             if(warning>0){totWarning=()->{if(settings.optBoolean("totSoundAlert",true))playTone(android.media.ToneGenerator.TONE_PROP_BEEP2);emit("tot",json("active",true,"startedAt",started,"limitSeconds",limit,"warningSeconds",warning,"visual",settings.optBoolean("totVisualAlert",true)));};controlsHandler.postDelayed(totWarning,Math.max(0,(limit-warning)*1000L-elapsed));}
         }
@@ -725,16 +767,24 @@ public final class RadioSessionService extends Service {
         int size=Math.max(FRAME_BYTES*4,min>0?min:FRAME_BYTES*4);
         if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.M) { AudioRecord result=new AudioRecord.Builder().setAudioSource(MediaRecorder.AudioSource.VOICE_COMMUNICATION)
             .setAudioFormat(new AudioFormat.Builder().setSampleRate(RATE).setChannelMask(AudioFormat.CHANNEL_IN_MONO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
-            .setBufferSizeInBytes(size).build();CarAudio.input(this,result);return result;}
+            .setBufferSizeInBytes(size).build();try{CarAudio.input(this,result);return result;}catch(RuntimeException error){result.release();throw error;}}
         return new AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION,RATE,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT,size);
     }
 
     private void captureLoop(AudioRecord audio) {
+        WebRtcVad carDetector=null;CarVoxEffects carEffects=null;
         short[] samples=new short[FRAME_SAMPLES]; ByteBuffer frame=ByteBuffer.allocate(FRAME_BYTES).order(ByteOrder.LITTLE_ENDIAN);
         try {
+            if(carVoxTransmitting){carDetector=new WebRtcVad(carVoxGate.mode());carEffects=new CarVoxEffects(audio);carEchoEffect=carEffects.echo;carNoiseEffect=carEffects.noise;}
             while(ptt.get()) {
                 int got=0; while(got<samples.length&&ptt.get()){int count=audio.read(samples,got,samples.length-got,AudioRecord.READ_BLOCKING);if(count<0)throw new java.io.IOException("Falha ao ler microfone: "+count);got+=count;}
                 if(!ptt.get()||got!=samples.length)break;
+                if(carVoxTransmitting){
+                    if(!carVoxReady()||receptionBusy()||audio.getRoutedDevice()==null||audio.getRoutedDevice().getId()!=carVoxInputId){CarModeState.disarmVox();carVoxStatus("OFF","VOX suspenso por condição de segurança/RX.");break;}
+                    CarVoxGate.Result result=carVoxGate.frame(carDetector.speech(samples),CarVoxGate.db(samples),CarVoxGate.zcr(samples),true,true,android.os.SystemClock.elapsedRealtime());
+                    if(result==CarVoxGate.Result.UNSAFE){CarModeState.disarmVox();carVoxStatus("OFF",carVoxGate.reason());break;}
+                    if(result==CarVoxGate.Result.END)break;
+                }
                 if(voxTransmitting){double sum=0;for(short sample:samples)sum+=(double)sample*sample;double db=20*Math.log10(Math.max(1e-6,Math.sqrt(sum/samples.length)/32768));if(db>=controls().optDouble("voxThreshold",-35))voxLastLoud=System.currentTimeMillis();if(System.currentTimeMillis()-voxLastLoud>=Math.max(300,Math.min(5000,controls().optInt("voxHangMs",1200))))break;}
                 int gain=CarModeState.active?CarModeState.txGainPercent:Math.max(0,Math.min(260,settings.optInt("txGainPercent",100)));
                 frame.clear();for(short sample:samples)frame.putShort(CarTxGain.apply(sample,gain,CarModeState.active));
@@ -743,7 +793,7 @@ public final class RadioSessionService extends Service {
                 synchronized(txCodewords){txCodewords.add(word);if(txCodewords.size()==3){List<byte[]> burst=new ArrayList<>(txCodewords);txCodewords.clear();byte[] slot=DmrFrameEngine.voiceBurst(burst,voiceSequence,txTalkgroup,Integer.parseInt(settings.getString("dmrId")),txPrivateCall);int flags=voiceSequence==0?0x10:voiceSequence;sendDmr(slot,flags);voiceSequence=(voiceSequence+1)%6;}}
             }
         } catch(Exception error) { if(ptt.get())emit("error",json("message","Falha na captura/codificação TX: "+safeMessage(error))); }
-        finally { stopPtt(); }
+        finally {if(carDetector!=null)carDetector.close();if(carEffects!=null)carEffects.close();stopPtt();}
     }
 
     private void stopPtt() {
@@ -751,7 +801,7 @@ public final class RadioSessionService extends Service {
         synchronized(receiveGuard){if(!ptt.getAndSet(false))return;txStopping=true;closeTransmission=txHeaderSent;txHeaderSent=false;}
         try {
         if(totCutoff!=null)controlsHandler.removeCallbacks(totCutoff);if(totWarning!=null)controlsHandler.removeCallbacks(totWarning);
-        pttStartedAt=0;voxTransmitting=false;tone(false);emit("tot",json("active",false));
+        pttStartedAt=0;carVoxTransmitting=false;voxTransmitting=false;tone(false);emit("tot",json("active",false));
         controlsHandler.postDelayed(this::startVoxMonitor,700);
         AudioRecord active=recorder; if(active!=null)try{active.stop();}catch(Exception ignored){}
         Thread worker=captureThread; if(worker!=null&&worker!=Thread.currentThread())try{worker.join(500);}catch(InterruptedException error){Thread.currentThread().interrupt();}
@@ -760,7 +810,7 @@ public final class RadioSessionService extends Service {
         synchronized(txCodewords){txCodewords.clear();}
         try { if(closeTransmission&&connected&&txTalkgroup>0)sendDmr(DmrFrameEngine.fullLc(txTalkgroup,Integer.parseInt(settings.getString("dmrId")),true,txPrivateCall),0x22); } catch(Exception error){Log.w(TAG,"Falha no terminador DMR",error);}
         emit("ptt",json("active",false,"direction","TX"));
-        startForegroundCompat(NOTIFICATION_ID,notification(connected?"Ligado · PTT em espera":"Ligação ZapDMR"),(controls().optBoolean("allowLocked")||controls().optBoolean("voxEnabled"))?ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE|ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE:ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
+        startForegroundCompat(NOTIFICATION_ID,notification(connected?"Ligado · PTT em espera":"Ligação ZapDMR"),(controls().optBoolean("allowLocked")||controls().optBoolean("voxEnabled")||CarModeState.voxArmed)?ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE|ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE:ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
         } finally {txStopping=false;}
     }
 
@@ -880,7 +930,7 @@ public final class RadioSessionService extends Service {
     private void acquireWakeLock(){try{PowerManager pm=(PowerManager)getSystemService(Context.POWER_SERVICE);if(wakeLock==null){wakeLock=pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"ZapDMR:RadioSession");wakeLock.setReferenceCounted(false);}if(!wakeLock.isHeld())wakeLock.acquire();}catch(Exception error){Log.w(TAG,"Wake lock não disponível",error);}}
     private void releaseWakeLock(){try{if(wakeLock!=null&&wakeLock.isHeld())wakeLock.release();}catch(Exception ignored){} }
     private JSONObject statusData(){OpenTerminal client=terminal;return json("xlxModule",isXlx()?"C":"","protocol",useOpenTerminal()?"odtp":"hbp","reception",json("protocol",useOpenTerminal()?"odtp":"hbp","supported",useOpenTerminal()||isXlx(),"state",client!=null?client.state():isXlx()&&connected?(xlxAudioReceived?"receiving":"awaiting-audio"):useOpenTerminal()?state:connected?"unsupported":state,"targetTalkgroupId",client!=null?client.target():selectedTalkgroup,"message",client!=null?client.message():useOpenTerminal()||isXlx()?stateMessage:connected?"Homebrew/HBP não oferece inscrição sem PTT. Use ODTP num master compatível.":stateMessage),"state",state,"connected",connected,"rxBusy",receiveGuard.busy(android.os.SystemClock.elapsedRealtime()),"pttReady",connected&&vocoder!=null&&!linking.get()&&pendingLinks.get()==0,"talkgroupBurstActive",pendingLinks.get()>0,"voiceCodecAvailable",vocoder!=null,"talkgroupId",selectedTalkgroup,"target",json("id",privateTargetId>0?privateTargetId:selectedTalkgroup,"callType",privateTargetId>0?"private":"group","slot",selectedSlot),"usage",usageData(),"reconnectAttempt",reconnectAttempt,"maxReconnectAttempts",maxReconnectAttempts(),"transitionReconnect",transitionReconnect,"message",stateMessage);}
-    private void emitStatus(){emit("status",statusData());int type=ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE;if(ptt.get()||(connected&&(controls().optBoolean("allowLocked")||controls().optBoolean("voxEnabled"))&&ContextCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED))type|=ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;startForegroundCompat(NOTIFICATION_ID,notification(stateMessage),type);}
+    private void emitStatus(){emit("status",statusData());int type=ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE;if(ptt.get()||(connected&&(controls().optBoolean("allowLocked")||controls().optBoolean("voxEnabled")||CarModeState.voxArmed)&&ContextCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED))type|=ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;startForegroundCompat(NOTIFICATION_ID,notification(stateMessage),type);}
     private void emit(String event,JSONObject data){if(destroyed)return;broadcastEvent(event,data);if(radioNotifications!=null){JSONObject entry=radioNotifications.onEvent(event,data,settings);if(entry!=null)broadcastEvent("systemLog",entry);}}
     private void broadcastEvent(String event,JSONObject data){if(destroyed&&!"quickExitResult".equals(event))return;Intent message=new Intent(ACTION_EVENT).setPackage(getPackageName()).putExtra(EXTRA_EVENT,event).putExtra(EXTRA_DATA,data==null?"{}":data.toString());sendBroadcast(message);}
     private void fail(String code,String message){state="error";stateMessage=message;emit("error",json("code",code,"message",message));emitStatus();}

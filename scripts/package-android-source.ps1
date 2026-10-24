@@ -9,7 +9,7 @@ Add-Type -AssemblyName System.IO.Compression
 $stream = [IO.File]::Open($destination, [IO.FileMode]::Create)
 $archive = [IO.Compression.ZipArchive]::new($stream, [IO.Compression.ZipArchiveMode]::Create, $false)
 $sourcePrefix = "ZapDMR-$releaseVersion-source/"
-$skipDirectories = @('.git', '.idea', '.gradle', '.android', '.android-signing', '.android-user-home', 'node_modules', 'build', 'jniLibs', 'public', '.gradle-home', '.gradle-user-home', '.java-user-home', '.wrangler', 'data', 'private', 'state', 'auth', 'credentials', 'sessions', 'work')
+$skipDirectories = @('.git', '.idea', '.cxx', '.gradle', '.android', '.android-signing', '.android-user-home', 'node_modules', 'build', 'jniLibs', 'public', '.gradle-home', '.gradle-user-home', '.java-user-home', '.wrangler', 'data', 'private', 'state', 'auth', 'credentials', 'sessions', 'work')
 $skipExtensions = @('.exe', '.dll', '.so', '.a', '.o', '.bin', '.img', '.jks', '.keystore', '.apk', '.zip', '.log', '.dpapi', '.pem', '.key', '.pfx', '.p12', '.db', '.sqlite', '.sqlite3')
 function Add-SourceFile([string]$path, [string]$name) {
     $entry = $archive.CreateEntry($sourcePrefix + $name.Replace('\','/'), [IO.Compression.CompressionLevel]::Fastest)

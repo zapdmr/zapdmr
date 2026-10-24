@@ -26,9 +26,12 @@ tasks.named('preBuild').configure { dependsOn 'prepareBundledFirmware' }
 
 android {
     namespace = "br.radio.zapdmr"
+    ndkVersion "27.0.12077973"
+    externalNativeBuild { cmake { path file("src/main/cpp/car-vad/CMakeLists.txt"); version "3.22.1" } }
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
         applicationId "br.radio.zapdmr"
+        ndk { abiFilters "arm64-v8a", "armeabi-v7a" }
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 25
@@ -44,7 +47,7 @@ android {
         carPreview {
             initWith release
             applicationIdSuffix ".carpreview"
-            versionNameSuffix "-car-preview.6"
+            versionNameSuffix "-car-preview.7"
             matchingFallbacks = ["release"]
             signingConfig signingConfigs.debug
         }
@@ -98,5 +101,5 @@ try {
 }
 
 android.applicationVariants.all { variant ->
-    if (variant.buildType.name == "carPreview") variant.outputs.all { versionCodeOverride = 15306 }
+    if (variant.buildType.name == "carPreview") variant.outputs.all { versionCodeOverride = 15307 }
 }

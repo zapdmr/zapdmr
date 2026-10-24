@@ -23,3 +23,5 @@ native/**/build-*/
 
 android/app/google-services.json
 *firebase*adminsdk*.json
+
+android/app/.cxx/

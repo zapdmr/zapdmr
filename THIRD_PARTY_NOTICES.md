@@ -49,3 +49,6 @@ Source: https://download.geonames.org/export/dump/. Coordinates are rounded
 city centres, not operator locations; supplied without warranty. See
 `web/cities/LICENSE.txt` and `scripts/prepare-city-centres.py`.
 
+
+## WebRTC VAD — Car Preview 07
+Offline WebRTC voice detector, vendored from wiseman/py-webrtcvad cbits/webrtc. BSD-3-Clause WebRTC code; see android/app/src/main/cpp/car-vad/UPSTREAM.txt, UPSTREAM-LICENSE and web/WEBRTC-VAD-LICENSE.txt. Only VAD core is used, not the Python wrapper. AEC/NS are Android platform effects when available; VAD is not a guarantee against false speech detection.

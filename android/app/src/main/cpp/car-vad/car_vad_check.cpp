@@ -1,0 +1,5 @@
+#include <stdio.h>
+#include <stdint.h>
+#include <string>
+#include "webrtc/common_audio/vad/include/webrtc_vad.h"
+int main(int argc,char** argv){VadInst* p=WebRtcVad_Create();if(!p||WebRtcVad_Init(p)||WebRtcVad_set_mode(p,3))return 1;int16_t zero[160]={0};for(int i=0;i<100;i++)if(WebRtcVad_Process(p,8000,zero,160)!=0)return 2;WebRtcVad_Free(p);if(argc<2)return 3;FILE* f=fopen(argv[1],"rb");if(!f)return 4;const char* expected[]={"011110111111111111111111111100","011110111111111111111111111100","000000111111111111111111110000","000000111111111111111100000000"};for(int mode=0;mode<4;mode++){rewind(f);p=WebRtcVad_Create();WebRtcVad_Init(p);WebRtcVad_set_mode(p,mode);int16_t pcm[240];std::string bits;while(fread(pcm,sizeof(int16_t),240,f)==240){int value=WebRtcVad_Process(p,8000,pcm,240);if(value<0)return 5;bits+=value?'1':'0';}WebRtcVad_Free(p);if(bits!=expected[mode]){printf("Unexpected VAD %d: %s\n",mode,bits.c_str());return 6;}}fclose(f);puts("PASS native WebRTC VAD: silence and upstream voice fixture match all four modes. No microphone/radio used.");return 0;}
