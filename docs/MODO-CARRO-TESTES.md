@@ -35,3 +35,5 @@ Passaram: car-scan.test.cjs, car-ui.test.cjs, open-terminal.test.cjs, xlx-sessio
 Não foi realizado teste em aparelho Android, Bluetooth físico, veículo ou rede de rádio real nesta etapa. ADB não apresentava dispositivo acessível. Nenhuma promessa de Android Auto ou homologação física.
 
 Refinamento: repetidos os testes car-ui e car-scan. O harness também verifica mostrar/ocultar favoritos, abertura do seletor rápido e reconectar sem iniciar TX, invalidando o destino confirmado. Revisão visual local do seletor e painel circular. Teste físico continua pendente.
+
+Validação adicional 04: open-terminal, xlx-session e quick-exit passaram em masters locais isolados. Não houve transmissão em rede real. O cabeçalho nativo usa a thread principal para atualizar as flags da janela; com rota padrão a troca de tela não libera/recria o player. O limite TOT passa a usar o valor configurado do perfil.

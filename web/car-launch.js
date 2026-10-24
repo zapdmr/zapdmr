@@ -1,0 +1,2 @@
+/* Keep the entry visible and explain initialization failures instead of hiding it. */
+(()=>{const button=document.getElementById('openCarModeHome'),note=document.getElementById('carLaunchStatus');if(!button)return;button.onclick=async()=>{try{if(!window.ZapDMRCarMode)throw Error('O painel não inicializou. Abra o registo de erros e informe Car Preview 04.');await window.ZapDMRCarMode.enter();note.textContent='';}catch(error){note.textContent=error.message||'Não foi possível abrir o Modo Carro.';}};})();

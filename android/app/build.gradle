@@ -44,7 +44,7 @@ android {
         carPreview {
             initWith release
             applicationIdSuffix ".carpreview"
-            versionNameSuffix "-car-preview"
+            versionNameSuffix "-car-preview.4"
             matchingFallbacks = ["release"]
             signingConfig signingConfigs.debug
         }
@@ -95,4 +95,8 @@ try {
     }
 } catch(Exception e) {
     logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}
+
+android.applicationVariants.all { variant ->
+    if (variant.buildType.name == "carPreview") variant.outputs.all { versionCodeOverride = 15304 }
 }

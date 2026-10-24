@@ -434,7 +434,7 @@ public final class RadioSessionService extends Service {
     }
     private boolean remoteAllowed(){android.app.KeyguardManager lock=(android.app.KeyguardManager)getSystemService(KEYGUARD_SERVICE);return controls().optBoolean("allowLocked")||lock==null||!lock.isKeyguardLocked();}
     private void togglePtt(){if(ptt.get())stopPtt();else if(!CarModeState.active)startPtt(selectedTalkgroup,selectedSlot);}
-    private void refreshCarAudioWhenIdle(){if(destroyed)return;if(ptt.get()||txStopping||receptionBusy()){controlsHandler.postDelayed(this::refreshCarAudioWhenIdle,300);return;}try{releasePlayer();abandonRxFocus();bluetoothRoute=null;if(CarModeState.active)bluetoothAudioActive=CarAudio.configure(this);else{CarAudio.configure(this);configureBluetooth();}}catch(Exception error){emit("error",json("message","Rota de áudio: "+safeMessage(error)));}}
+    private void refreshCarAudioWhenIdle(){if(destroyed)return;if(CarModeState.outputId==0&&CarModeState.inputId==0&&!CarAudio.hasOverride()){if(CarModeState.active){AudioTrack current=player;if(current!=null)CarAudio.output(this,current);}return;}if(ptt.get()||txStopping||receptionBusy()){controlsHandler.postDelayed(this::refreshCarAudioWhenIdle,300);return;}try{releasePlayer();abandonRxFocus();bluetoothRoute=null;if(CarModeState.active)bluetoothAudioActive=CarAudio.configure(this);else{CarAudio.configure(this);configureBluetooth();}}catch(Exception error){emit("error",json("message","Rota de áudio: "+safeMessage(error)));}}
     private void configureBluetooth(){
         if(CarModeState.active)return;
         boolean enabled=controls().optBoolean("bluetoothPtt");
@@ -709,7 +709,7 @@ public final class RadioSessionService extends Service {
         if(totCutoff!=null)controlsHandler.removeCallbacks(totCutoff);
         if(totWarning!=null)controlsHandler.removeCallbacks(totWarning);
         boolean enabled=CarModeState.active||settings.optBoolean("totEnabled",true);
-        int limit=CarModeState.active?180:Math.max(30,Math.min(900,settings.optInt("totLimitSeconds",180)));
+        int limit=Math.max(30,Math.min(900,settings.optInt("totLimitSeconds",180)));
         int warning=Math.max(0,Math.min(limit-1,settings.optInt("totWarningSeconds",10)));
         long elapsed=Math.max(0,System.currentTimeMillis()-started);
         if(enabled){

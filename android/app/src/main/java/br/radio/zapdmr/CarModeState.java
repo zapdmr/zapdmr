@@ -3,6 +3,7 @@ package br.radio.zapdmr;
 /** Runtime-only car safety overlay. Never rewrites the saved PTT/VOX/TOT preferences. */
 final class CarModeState {
     static volatile boolean active, pointerHeld;
+    static volatile boolean keepScreenOn=true, visible=true;
     static volatile long pointerTick;
     static volatile int confirmedTarget, confirmedSlot, outputId, inputId;
     static synchronized void mode(boolean value){active=value;pointerHeld=false;confirmedTarget=0;confirmedSlot=0;}
