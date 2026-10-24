@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import {fixture} from './chat-fixture.mjs';
+import {appReleases} from '../../site/cloudflare/app-releases.mjs';
+import {handleApi} from '../../site/cloudflare/api.mjs';
+const f=await fixture(),raw={version:'2.0.0',versionCode:20,changelog:'Chat e áudio',apkUrl:'https://github.com/zapdmr/zapdmr/releases/download/v2.0.0/ZapDMR-Android-2.0.0.apk',sha256:'a'.repeat(64),bytes:100000,minSupportedCode:19,requiredReason:'Protocolo de teste'};
+const fail=(status,message)=>Object.assign(new Error(message),{status});let badDigest=false;
+const releases=appReleases({db:f.env.DB},{failure:fail},async()=>Response.json({draft:false,assets:[{name:'ZapDMR-Android-2.0.0.apk',state:'uploaded',browser_download_url:raw.apkUrl,size:raw.bytes,digest:'sha256:'+(badDigest?'b'.repeat(64):raw.sha256)}]}));
+assert.equal(await releases.latest(),null);
+await assert.rejects(releases.publish({...raw,apkUrl:'https://evil.invalid/a.apk'}));badDigest=true;await assert.rejects(releases.publish(raw));badDigest=false;
+let release=await releases.publish(raw);assert.equal(release.versionCode,20);assert.equal(release.minSupportedCode,19);assert.equal((await releases.history()).length,1);
+assert.equal((await f.request(null,'/admin/releases')).response.status,401);
+const request=new Request('http://localhost/v1/inbox',{headers:{Authorization:'Bearer '+f.tokens.TEST1A,'X-ZapDMR-Platform':'android','X-ZapDMR-Version-Code':'18'}});
+assert.equal((await handleApi(request,f.env)).status,426,'incompatible Android blocked by backend');
+const allowed=new Request('http://localhost/v1/inbox',{headers:{Authorization:'Bearer '+f.tokens.TEST1A,'X-ZapDMR-Platform':'android','X-ZapDMR-Version-Code':'19'}});
+assert.equal((await handleApi(allowed,f.env)).status,200);
+await releases.unpublish(20);assert.equal(await releases.latest(),null);assert.equal((await releases.history())[0].published,0);
+console.log('PASS: release integrity and official URL checks, authenticated admin, version history/unpublish, incompatible Android blocked and compatible version allowed. Mock GitHub assets; no external publication.');

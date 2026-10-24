@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import {fixture} from './chat-fixture.mjs';
+import {chatPush,pushConfigured} from '../../site/cloudflare/chat-push.mjs';
+const f=await fixture(),ask=async(call,path,body,method)=>{const r=await f.request(call,path,body,method);return{status:r.response.status,...await r.json()};};
+assert.equal(pushConfigured(f.env),false);assert.equal((await ask('TEST1A','/v1/push/status')).configured,false);assert.equal((await ask('TEST1A','/v1/push/devices',{token:'x'.repeat(150),consent:true})).status,503);
+const keys=await crypto.subtle.generateKey({name:'RSASSA-PKCS1-v1_5',modulusLength:2048,publicExponent:new Uint8Array([1,0,1]),hash:'SHA-256'},true,['sign','verify']);
+Object.assign(f.env,{FCM_PROJECT_ID:'zapdmr-test',FCM_CLIENT_EMAIL:'sender@zapdmr-test.iam.gserviceaccount.com',FCM_PRIVATE_KEY:'-----BEGIN PRIVATE KEY-----\n'+Buffer.from(await crypto.subtle.exportKey('pkcs8',keys.privateKey)).toString('base64')+'\n-----END PRIVATE KEY-----'});
+let auth=await ask('TEST1B','/v1/auth/session',{});assert.equal(auth.status,200);f.tokens.TEST1B=auth.token;
+assert.equal((await ask('TEST1B','/v1/push/devices',{token:'x'.repeat(150),consent:false})).status,400);
+assert.equal((await ask('TEST1B','/v1/push/devices',{token:'x'.repeat(150),consent:true})).status,200);
+let sent=await ask('TEST1A','/v1/messages',{to:f.users.TEST1B,text:'Conteúdo privado não pode sair no push',clientId:'push_test_request_00001'});assert.equal(sent.status,201);assert.equal(f.sqlite.prepare('SELECT count(*) n FROM push_outbox').get().n,1);
+const aes=await crypto.subtle.importKey('raw',Buffer.from(f.env.DATA_ENCRYPTION_KEY,'hex'),'AES-GCM',false,['decrypt']);let calls=0,payload;
+const push=chatPush({db:f.env.DB},f.env,{unseal:async(config,value)=>{const data=Buffer.from(value,'base64');return new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:data.subarray(0,12)},aes,data.subarray(12)));}},async(url,options)=>{calls++;if(url.includes('oauth2.'))return Response.json({access_token:'local-mock-only',expires_in:3600});payload=JSON.parse(options.body);return Response.json({name:'mock-message'});});
+assert.equal((await push.drain()).sent,1);assert.equal(calls,2);assert.equal(payload.message.data.zapdmrPeer,f.users.TEST1A);assert(!JSON.stringify(payload).includes('Conteúdo privado'));assert.equal(f.sqlite.prepare('SELECT count(*) n FROM push_outbox').get().n,0);
+await ask('TEST1A','/v1/messages',{to:f.users.TEST1B,text:'Outra mensagem',clientId:'push_test_request_00002'});await ask('TEST1B','/v1/auth/logout',{refreshToken:auth.refreshToken});assert.equal((await push.drain()).sent,0,'revoked device cannot receive queued notices');
+console.log('PASS: Firebase disabled without configuration, explicit consent, authenticated device binding, encrypted token, transactional queue, OAuth/FCM adapter mock, private payload and revoked-device suppression. No external FCM delivery.');

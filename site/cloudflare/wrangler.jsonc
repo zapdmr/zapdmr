@@ -1,0 +1,60 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "zapdmr-community",
+  "account_id": "affa3aa1350225291ef1a2f0139dfe10",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-19",
+  "workers_dev": true,
+  "preview_urls": false,
+  "routes": [
+    {
+      "pattern": "www.zapdmr.com.br",
+      "custom_domain": true
+    },
+    {
+      "pattern": "zapdmr.com.br",
+      "custom_domain": true
+    }
+  ],
+  "assets": {
+    "directory": "../public",
+    "binding": "ASSETS",
+    "run_worker_first": [
+      "/*",
+      "!/site.js",
+      "!/site.css",
+      "!/ZapDMR.png"
+    ],
+    "html_handling": "none",
+    "not_found_handling": "none"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "zapdmr-community",
+      "database_id": "6f272e21-de29-40a1-8bfd-801e00d2a95a"
+    }
+  ],
+  "vars": {
+    "PUBLIC_ORIGIN": "https://www.zapdmr.com.br",
+    "OWNER_NAME": "Rizandro Cesar da Silva",
+    "PRIVACY_EMAIL": "rizandro@gmail.com",
+    "WHATSAPP_CONFIRM_NUMBER": "+5543996741200",
+    "WHATSAPP_LOCAL_BRIDGE": "1",
+    "DOWNLOAD_ANDROID_URL": "https://github.com/zapdmr/zapdmr/releases/download/v1.5.2/ZapDMR-Android-1.5.2.apk",
+    "DOWNLOAD_ANDROID_BYTES": "13697209",
+    "DOWNLOAD_ANDROID_SHA256": "3b448fe8ee0bec552989fada78a416644065c485a519b9c247fcde3a2d0021ec",
+    "DOWNLOAD_WINDOWS_URL": "https://github.com/zapdmr/zapdmr/releases/download/v1.5.2/ZapDMR-Windows-1.5.2.exe",
+    "DOWNLOAD_WINDOWS_BYTES": "165343744",
+    "DOWNLOAD_WINDOWS_SHA256": "e60dc7d35e02f4ba57dbc639ae5f214c93e5bd68e6cacf6726b4f22d1af4cb30",
+    "SOURCE_URL": "https://github.com/zapdmr/zapdmr/releases/download/v1.5.2/ZapDMR-Windows-1.5.2-source.zip"
+  },
+  "triggers": {
+    "crons": [
+      "* * * * *"
+    ]
+  },
+  "observability": {
+    "enabled": false
+  }
+}

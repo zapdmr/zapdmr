@@ -1,0 +1,23 @@
+[Unit]
+Description=ZapDMR community and download portal
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=zapdmr
+Group=zapdmr
+WorkingDirectory=/opt/zapdmr/site
+EnvironmentFile=/etc/zapdmr.env
+ExecStart=/usr/bin/node /opt/zapdmr/site/server.mjs
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/zapdmr
+
+[Install]
+WantedBy=multi-user.target

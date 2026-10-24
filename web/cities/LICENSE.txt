@@ -1,0 +1,4 @@
+City centres: GeoNames, https://www.geonames.org/
+Source: cities500.zip and admin1CodesASCII.txt, downloaded 2026-10-23.
+Creative Commons Attribution 4.0: https://creativecommons.org/licenses/by/4.0/
+Converted to per-country JSON with rounded coordinates. Approximate city centres, not operator GPS. No warranty of accuracy or completeness.

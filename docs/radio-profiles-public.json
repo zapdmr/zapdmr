@@ -1,0 +1,12 @@
+{
+ "schemaVersion":1,
+ "revision":1,
+ "issuedAt":"2026-10-24T00:00:00Z",
+ "profiles":[{
+  "id":"xlx026-brasil",
+  "name":"XLX026 BRASIL",
+  "settings":{"serverType":"other","radioProtocol":"hbp","masterHost":"xlx026.net","masterPort":62030,"defaultSlot":2,"xlxModule":"C","userUrl":"C","essid":"","staticTalkgroups":"","hbpOptions":"","selectedTalkgroupId":4003,"favorites":[4003],"autoReconnect":true,"autoConnectOnStartup":true},
+  "credential":{"kind":"public-shared","value":"p4ssw0rd","authorization":"Distribuição confirmada pelo responsável após autorização do administrador, 23/10/2026"},
+  "evidence":{"module":"https://xlx026.net/ai-context.json","transport":"HBP IPv4 / UDP 62030 validado na versão anterior; reconfirmar em teste real da candidata"}
+ }]
+}

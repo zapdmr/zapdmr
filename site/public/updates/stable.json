@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "channel": "stable",
+  "policy": {
+    "checkIntervalMinutes": 60,
+    "remindAfterHours": 24
+  },
+  "platforms": {
+    "android": {
+      "platform": "android",
+      "version": "1.5.2",
+      "versionCode": 24,
+      "minSupportedCode": 0,
+      "requiredReason": "",
+      "critical": false,
+      "channel": "stable",
+      "publishedAt": "2026-10-23T23:55:48Z",
+      "changelog": "## Atualizadores Android e Windows\r\n\r\nVersÃ£o testada e aprovada pelo responsÃ¡vel para publicaÃ§Ã£o.\r\n\r\n- Nova consulta ao abrir e retomar o aplicativo, com repetiÃ§Ã£o apÃ³s falhas de conexÃ£o.\r\n- Aviso com versÃ£o disponÃ­vel, novidades e opÃ§Ã£o de atualizar depois.\r\n- Download autorizado pelo operador e proteÃ§Ã£o durante RX/TX.\r\n- ValidaÃ§Ã£o de integridade dos pacotes; mantÃ©m o instalador Squirrel no Windows e o certificado Android existente.\r\n- Preserva perfis, credenciais e as funcionalidades de rÃ¡dio e ZapChat.\r\n\r\nInstale sobre a versÃ£o existente, sem desinstalar. Se a versÃ£o anterior nÃ£o mostrar o aviso, faÃ§a esta atualizaÃ§Ã£o manualmente uma vez pelo site. O Android solicita confirmaÃ§Ã£o da instalaÃ§Ã£o.\r\n\r\nOs arquivos *-source.zip contÃªm o cÃ³digo-fonte correspondente dos instaladores; RELEASES e .nupkg sÃ£o necessÃ¡rios para a atualizaÃ§Ã£o interna Windows. A versÃ£o 1.5.1 continua disponÃ­vel como versÃ£o anterior.\r\n\r\nAvisos pelo WhatsApp oficial ainda dependem de configuraÃ§Ã£o; nÃ£o hÃ¡ promessa de notificaÃ§Ã£o com o aplicativo totalmente encerrado.",
+      "apkUrl": "https://github.com/zapdmr/zapdmr/releases/download/v1.5.2/ZapDMR-Android-1.5.2.apk",
+      "bytes": 13697209,
+      "sha256": "3b448fe8ee0bec552989fada78a416644065c485a519b9c247fcde3a2d0021ec"
+    },
+    "windows": {
+      "platform": "windows",
+      "version": "1.5.2",
+      "minSupportedVersion": "1.4.8",
+      "critical": false,
+      "channel": "stable",
+      "publishedAt": "2026-10-23T23:55:48Z",
+      "changelog": "## Atualizadores Android e Windows\r\n\r\nVersÃ£o testada e aprovada pelo responsÃ¡vel para publicaÃ§Ã£o.\r\n\r\n- Nova consulta ao abrir e retomar o aplicativo, com repetiÃ§Ã£o apÃ³s falhas de conexÃ£o.\r\n- Aviso com versÃ£o disponÃ­vel, novidades e opÃ§Ã£o de atualizar depois.\r\n- Download autorizado pelo operador e proteÃ§Ã£o durante RX/TX.\r\n- ValidaÃ§Ã£o de integridade dos pacotes; mantÃ©m o instalador Squirrel no Windows e o certificado Android existente.\r\n- Preserva perfis, credenciais e as funcionalidades de rÃ¡dio e ZapChat.\r\n\r\nInstale sobre a versÃ£o existente, sem desinstalar. Se a versÃ£o anterior nÃ£o mostrar o aviso, faÃ§a esta atualizaÃ§Ã£o manualmente uma vez pelo site. O Android solicita confirmaÃ§Ã£o da instalaÃ§Ã£o.\r\n\r\nOs arquivos *-source.zip contÃªm o cÃ³digo-fonte correspondente dos instaladores; RELEASES e .nupkg sÃ£o necessÃ¡rios para a atualizaÃ§Ã£o interna Windows. A versÃ£o 1.5.1 continua disponÃ­vel como versÃ£o anterior.\r\n\r\nAvisos pelo WhatsApp oficial ainda dependem de configuraÃ§Ã£o; nÃ£o hÃ¡ promessa de notificaÃ§Ã£o com o aplicativo totalmente encerrado.",
+      "installer": {
+        "name": "ZapDMR-Windows-1.5.2.exe",
+        "url": "https://github.com/zapdmr/zapdmr/releases/download/v1.5.2/ZapDMR-Windows-1.5.2.exe",
+        "bytes": 165343744,
+        "sha256": "e60dc7d35e02f4ba57dbc639ae5f214c93e5bd68e6cacf6726b4f22d1af4cb30"
+      },
+      "package": {
+        "name": "zapdmr-1.5.2-full.nupkg",
+        "url": "https://github.com/zapdmr/zapdmr/releases/download/v1.5.2/zapdmr-1.5.2-full.nupkg",
+        "bytes": 164309670,
+        "sha256": "20aece767966d5b015a41b76bca2edaf2a7a5507fa5b5fa5dc1210b1396cdd99"
+      },
+      "manifest": {
+        "name": "RELEASES",
+        "url": "https://github.com/zapdmr/zapdmr/releases/download/v1.5.2/RELEASES",
+        "bytes": 75,
+        "sha256": "4f6c1a944f4629f20a6a0cf4cf4d2d9e90a77d783ce43750fbc9f9feab577720"
+      }
+    }
+  }
+}
