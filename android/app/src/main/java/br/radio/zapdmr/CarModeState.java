@@ -4,6 +4,7 @@ package br.radio.zapdmr;
 final class CarModeState {
     static volatile boolean active, pointerHeld;
     static volatile boolean keepScreenOn=true, visible=true;
+    static volatile int txGainPercent=130;
     static volatile long pointerTick;
     static volatile int confirmedTarget, confirmedSlot, outputId, inputId;
     static synchronized void mode(boolean value){active=value;pointerHeld=false;confirmedTarget=0;confirmedSlot=0;}

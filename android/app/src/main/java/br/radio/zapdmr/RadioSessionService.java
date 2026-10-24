@@ -736,8 +736,8 @@ public final class RadioSessionService extends Service {
                 int got=0; while(got<samples.length&&ptt.get()){int count=audio.read(samples,got,samples.length-got,AudioRecord.READ_BLOCKING);if(count<0)throw new java.io.IOException("Falha ao ler microfone: "+count);got+=count;}
                 if(!ptt.get()||got!=samples.length)break;
                 if(voxTransmitting){double sum=0;for(short sample:samples)sum+=(double)sample*sample;double db=20*Math.log10(Math.max(1e-6,Math.sqrt(sum/samples.length)/32768));if(db>=controls().optDouble("voxThreshold",-35))voxLastLoud=System.currentTimeMillis();if(System.currentTimeMillis()-voxLastLoud>=Math.max(300,Math.min(5000,controls().optInt("voxHangMs",1200))))break;}
-                int gain=Math.max(0,Math.min(260,settings.optInt("txGainPercent",100)));
-                frame.clear();for(short sample:samples){int amplified=sample*gain/100;frame.putShort((short)Math.max(Short.MIN_VALUE,Math.min(Short.MAX_VALUE,amplified)));}
+                int gain=CarModeState.active?CarModeState.txGainPercent:Math.max(0,Math.min(260,settings.optInt("txGainPercent",100)));
+                frame.clear();for(short sample:samples)frame.putShort(CarTxGain.apply(sample,gain,CarModeState.active));
                 emitAudioLevel("TX", frame.array(), txTalkgroup, Integer.parseInt(settings.getString("dmrId")));
                 byte[] word=vocoder.encodeFec(frame.array());
                 synchronized(txCodewords){txCodewords.add(word);if(txCodewords.size()==3){List<byte[]> burst=new ArrayList<>(txCodewords);txCodewords.clear();byte[] slot=DmrFrameEngine.voiceBurst(burst,voiceSequence,txTalkgroup,Integer.parseInt(settings.getString("dmrId")),txPrivateCall);int flags=voiceSequence==0?0x10:voiceSequence;sendDmr(slot,flags);voiceSequence=(voiceSequence+1)%6;}}
@@ -799,7 +799,7 @@ public final class RadioSessionService extends Service {
                     if(ContextCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)throw new java.io.IOException("Permita o microfone para gravar o teste local.");
                     startForegroundCompat(NOTIFICATION_ID,notification("Teste local do microfone · sem transmitir"),ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE|ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
                     capture=createRecorder();capture.startRecording();
-                    for(int f=0;f<150;f++){short[] samples=new short[160];int got=0;while(got<160){int count=capture.read(samples,got,160-got);if(count<=0)throw new java.io.IOException("Não foi possível capturar o microfone.");got+=count;}byte[] pcm=new byte[320];int gain=settings.optInt("txGainPercent",100);for(int i=0;i<160;i++){int sample=Math.max(-32768,Math.min(32767,samples[i]*gain/100));pcm[2*i]=(byte)sample;pcm[2*i+1]=(byte)(sample>>8);}frames.add(pcm);emitAudioLevel("TX",pcm,selectedTalkgroup,0);}
+                    for(int f=0;f<150;f++){short[] samples=new short[160];int got=0;while(got<160){int count=capture.read(samples,got,160-got);if(count<=0)throw new java.io.IOException("Não foi possível capturar o microfone.");got+=count;}byte[] pcm=new byte[320];int gain=CarModeState.active?CarModeState.txGainPercent:settings.optInt("txGainPercent",100);for(int i=0;i<160;i++){int sample=CarTxGain.apply(samples[i],gain,CarModeState.active);pcm[2*i]=(byte)sample;pcm[2*i+1]=(byte)(sample>>8);}frames.add(pcm);emitAudioLevel("TX",pcm,selectedTalkgroup,0);}
                     capture.stop();capture.release();capture=null;
                 }else{
                     for(int f=0;f<30;f++){byte[] pcm=new byte[320];for(int i=0;i<160;i++){int sample=(int)(Math.sin(2*Math.PI*440*(f*160+i)/8000)*7000);pcm[2*i]=(byte)sample;pcm[2*i+1]=(byte)(sample>>8);}frames.add(pcm);}
