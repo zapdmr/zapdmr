@@ -19,19 +19,21 @@ public final class CarModePlugin extends Plugin {
     private BroadcastReceiver receiver;private AudioDeviceCallback deviceCallback;
     private AudioManager.OnCommunicationDeviceChangedListener communicationListener;
     private PluginCall routeCall;private long routeGeneration;private int routeExpectedInput,routeExpectedOutput;
+    private PluginCall voxCall;private long voxCallGeneration;
     private PluginCall tuneCall;private String tuneId;
     private String outputName="",inputName="";private int outputType,inputType;private boolean priorKeepAwake;
     private final Runnable watchdog=new Runnable(){public void run(){if(CarModeState.expired(SystemClock.elapsedRealtime()))releasePointer();if(CarModeState.voxArmed&&!CarModeState.voxLeaseValid(SystemClock.elapsedRealtime()))disableVox("Interface sem resposta; VOX desligado.");if(CarModeState.active)handler.postDelayed(this,250);}};
     private boolean bluetoothAllowed(){return Build.VERSION.SDK_INT<31||ContextCompat.checkSelfPermission(getContext(),Manifest.permission.BLUETOOTH_CONNECT)==PackageManager.PERMISSION_GRANTED;}
     private AudioManager audio(){return (AudioManager)getContext().getSystemService(Context.AUDIO_SERVICE);}
     private void command(String action){if(RadioSessionService.running)getContext().startService(new Intent(getContext(),RadioSessionService.class).setAction(action));}
-    private void disableVox(String reason){CarModeState.disarmVox();if(RadioSessionService.running)getContext().startService(new Intent(getContext(),RadioSessionService.class).setAction(RadioSessionService.ACTION_CAR_VOX).putExtra("enabled",false).putExtra("reason",reason));}
+    private void disableVox(String reason){if(voxCall!=null){PluginCall pending=voxCall;voxCall=null;pending.reject(reason);}CarModeState.disarmVox();if(RadioSessionService.running)getContext().startService(new Intent(getContext(),RadioSessionService.class).setAction(RadioSessionService.ACTION_CAR_VOX).putExtra("enabled",false).putExtra("reason",reason));}
     private void releasePointer(){CarModeState.pointer(false,SystemClock.elapsedRealtime());command(RadioSessionService.ACTION_PTT_UP);}
     @Override public void load(){
         android.content.SharedPreferences saved=getContext().getSharedPreferences("zapdmr_car_routes",Context.MODE_PRIVATE);outputName=saved.getString("outputName","");inputName=saved.getString("inputName","");outputType=saved.getInt("outputType",0);inputType=saved.getInt("inputType",0);
         receiver=new BroadcastReceiver(){@Override public void onReceive(Context context,Intent intent){
             if(RadioSessionService.ACTION_EVENT.equals(intent.getAction())){
                 try{JSONObject packet=new JSONObject(intent.getStringExtra(RadioSessionService.EXTRA_DATA));
+                    if("carVox".equals(intent.getStringExtra(RadioSessionService.EXTRA_EVENT))&&voxCall!=null&&(packet.optLong("generation",-1)==voxCallGeneration||!packet.optBoolean("armed")&&packet.optLong("generation",-1)==voxCallGeneration+1)){if(!packet.optBoolean("armed")){PluginCall pending=voxCall;voxCall=null;pending.reject(packet.optString("message","VOX não iniciou."));}else if(packet.optBoolean("initialized")&&RadioSessionService.carVoxInitializationConfirmed(voxCallGeneration)){PluginCall pending=voxCall;voxCall=null;pending.resolve(JSObject.fromJSONObject(packet));}}
                     if("carTuneResult".equals(intent.getStringExtra(RadioSessionService.EXTRA_EVENT))&&tuneCall!=null&&Objects.equals(tuneId,packet.optString("requestId"))){PluginCall pending=tuneCall;tuneCall=null;tuneId=null;pending.resolve(JSObject.fromJSONObject(packet));}
                 }catch(Exception ignored){}return;
             }
@@ -67,10 +69,11 @@ public final class CarModePlugin extends Plugin {
     @PluginMethod public void txGain(PluginCall call){if(!CarModeState.active||RadioSessionService.profileBusy()){call.reject("Termine a transmissão ou teste antes de ajustar o ganho.");return;}CarModeState.txGainPercent=Math.max(0,Math.min(300,call.getInt("percent",260)));call.resolve(new JSObject().put("percent",CarModeState.txGainPercent));}
     @PluginMethod public void vox(PluginCall call){
         boolean enabled=Boolean.TRUE.equals(call.getBoolean("enabled",false));if(!enabled){disableVox("VOX desligado pelo operador.");call.resolve(new JSObject().put("armed",false));return;}
-        if(!CarModeState.active||!CarModeState.visible||RadioSessionService.profileBusy()||RadioSessionService.receptionBusy()||!RadioSessionService.carTargetMatches(CarModeState.confirmedTarget,CarModeState.confirmedSlot)||!WebRtcVad.available()){call.reject("Confirme a TG, aguarde RX/TX terminar e use uma versão com VAD disponível.");return;}
+        boolean diagnostic=Boolean.TRUE.equals(call.getBoolean("diagnostic",false));if(voxCall!=null){call.reject("Aguarde a inicialização do VOX.");return;}
+        if(!CarModeState.active||!CarModeState.visible||RadioSessionService.profileBusy()||(!diagnostic&&(RadioSessionService.receptionBusy()||!RadioSessionService.carTargetMatches(CarModeState.confirmedTarget,CarModeState.confirmedSlot)))||!WebRtcVad.available()){call.reject("Confirme a TG, aguarde RX/TX terminar e use uma versão com VAD disponível.");return;}
         if(ContextCompat.checkSelfPermission(getContext(),Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){call.reject("Autorize o microfone para ativar VOX.");return;}
-        CarModeState.voxSensitivity=Math.max(0,Math.min(2,call.getInt("sensitivity",1)));CarModeState.voxHangMs=Math.max(400,Math.min(3000,call.getInt("hangMs",1200)));CarModeState.armVox(SystemClock.elapsedRealtime());
-        getContext().startService(new Intent(getContext(),RadioSessionService.class).setAction(RadioSessionService.ACTION_CAR_VOX).putExtra("enabled",true));call.resolve(new JSObject().put("armed",true));
+        CarModeState.voxSensitivity=Math.max(0,Math.min(2,call.getInt("sensitivity",1)));CarModeState.voxHangMs=Math.max(400,Math.min(3000,call.getInt("hangMs",1200)));CarModeState.voxDiagnostic=diagnostic;CarModeState.voxEcho=Boolean.TRUE.equals(call.getBoolean("echo",true));CarModeState.voxNoise=Boolean.TRUE.equals(call.getBoolean("noise",true));CarModeState.armVox(SystemClock.elapsedRealtime());voxCall=call;voxCallGeneration=CarModeState.voxGeneration;final long generation=voxCallGeneration;
+        getContext().startService(new Intent(getContext(),RadioSessionService.class).setAction(RadioSessionService.ACTION_CAR_VOX).putExtra("enabled",true));handler.postDelayed(()->{if(voxCall!=null&&voxCallGeneration==generation)disableVox("O microfone/VAD não confirmou inicialização em 5 segundos. Consulte o diagnóstico.");},5000);
     }
     @PluginMethod public void voxHeartbeat(PluginCall call){if(CarModeState.active&&CarModeState.visible&&CarModeState.voxArmed)CarModeState.voxTick=SystemClock.elapsedRealtime();call.resolve();}
     @PluginMethod public void screenPreference(PluginCall call){CarModeState.keepScreenOn=Boolean.TRUE.equals(call.getBoolean("enabled",true));if(CarModeState.active)applyScreen();call.resolve();}

@@ -5,9 +5,9 @@ final class CarModeState {
     static volatile boolean active, pointerHeld;
     static volatile boolean keepScreenOn=true, visible=true;
     static volatile int txGainPercent=260;
-    static volatile boolean voxArmed;static volatile int voxSensitivity=1,voxHangMs=1200;static volatile long voxTick,voxGeneration;
+    static volatile boolean voxDiagnostic,voxEcho=true,voxNoise=true;static volatile boolean voxArmed;static volatile int voxSensitivity=1,voxHangMs=1200;static volatile long voxTick,voxGeneration;
     static synchronized void armVox(long now){voxGeneration++;voxTick=now;voxArmed=true;}
-    static synchronized void disarmVox(){voxArmed=false;voxGeneration++;}
+    static synchronized void disarmVox(){voxArmed=false;voxDiagnostic=false;voxGeneration++;}
     static synchronized boolean disarmVox(long expected){if(voxGeneration!=expected)return false;disarmVox();return true;}
     static boolean voxLeaseValid(long now){return now-voxTick<=1800;}
     static volatile long pointerTick;

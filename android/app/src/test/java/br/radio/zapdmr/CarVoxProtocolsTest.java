@@ -1,0 +1,8 @@
+package br.radio.zapdmr;
+import org.junit.Test;
+import static org.junit.Assert.*;
+public class CarVoxProtocolsTest {
+ @Test public void sameVoicePolicyForDmrAndXlx(){for(int target:new int[]{724,4003}){CarModeState.mode(true);CarModeState.confirmedTarget=target;CarModeState.confirmedSlot=target==4003?2:1;assertTrue(CarModeState.allowsTx(target,CarModeState.confirmedSlot));assertFalse(CarModeState.allowsTx(target,CarModeState.confirmedSlot==1?2:1));CarVoxGate gate=new CarVoxGate(1,1200);for(long t=1000;t<=2000;t+=20)gate.frame(false,-65,.1,true,false,t);assertTrue(gate.calibrated());gate.frame(true,-30,.2,true,false,2100);assertEquals(CarVoxGate.Result.START,gate.frame(true,-30,.2,true,false,2360));assertEquals(CarVoxGate.Result.SPEAKING,gate.frame(true,-30,.2,true,true,2400));assertEquals(CarVoxGate.Result.END,gate.frame(false,-65,.1,true,true,3620));CarModeState.mode(false);}}
+ @Test public void recorderIdMayChangeButPhysicalInputMustMatch(){assertTrue(CarAudioTypes.sameInput(7,"MyLink","car",7,"MyLink","car"));assertFalse(CarAudioTypes.sameInput(7,"MyLink","car",7,"Other","other"));assertFalse(CarAudioTypes.sameInput(7,"MyLink","",15,"Phone",""));assertTrue(CarAudioTypes.sameInput(15,"Phone","",15,"Phone",""));assertFalse(CarAudioTypes.sameInput(15,"Phone","",15,"Unknown",""));}
+ @Test public void diagnosticCannotRemainArmedAfterExit(){CarModeState.mode(true);CarModeState.voxDiagnostic=true;CarModeState.armVox(1000);assertTrue(CarModeState.voxDiagnostic);CarModeState.disarmVox();assertFalse(CarModeState.voxDiagnostic);assertFalse(CarModeState.voxArmed);CarModeState.mode(false);}
+}

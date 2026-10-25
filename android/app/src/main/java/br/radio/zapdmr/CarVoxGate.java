@@ -4,6 +4,7 @@ final class CarVoxGate {
  enum Result { WAIT, CALIBRATING, READY, START, SPEAKING, END, RX_BLOCKED, UNSAFE }
  private final int sensitivity,hang;private double noise=-65,steadyDb,steadyZcr;private long quiet,speech,lastVoice,blockedUntil,steady,loud,started;private boolean calibrated,transmitting;private String reason="";
  CarVoxGate(int sensitivity,int hang){this.sensitivity=Math.max(0,Math.min(2,sensitivity));this.hang=Math.max(400,Math.min(3000,hang));}
+ synchronized double noiseDb(){return noise;}synchronized boolean calibrated(){return calibrated;}
  synchronized String reason(){return reason;}int mode(){return sensitivity==2?2:3;}
  synchronized void blocked(long now){calibrated=false;speech=0;quiet=0;steady=0;blockedUntil=now+1200;}
  synchronized Result frame(boolean vad,double db,double zcr,boolean eligible,boolean tx,long now){

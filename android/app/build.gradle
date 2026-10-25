@@ -47,7 +47,7 @@ android {
         carPreview {
             initWith release
             applicationIdSuffix ".carpreview"
-            versionNameSuffix "-car-preview.10"
+            versionNameSuffix "-car-preview.11"
             matchingFallbacks = ["release"]
             signingConfig signingConfigs.debug
         }
@@ -101,5 +101,5 @@ try {
 }
 
 android.applicationVariants.all { variant ->
-    if (variant.buildType.name == "carPreview") variant.outputs.all { versionCodeOverride = 15310 }
+    if (variant.buildType.name == "carPreview") variant.outputs.all { versionCodeOverride = 15311 }
 }
