@@ -4,7 +4,7 @@
     hidePttButton:false, beepStart:false, beepStop:false, beepIncoming:false, keepScreenOn:false,
     hideStatusBar:false, showMeters:true, voxEnabled:false, voxThreshold:-35, voxHangMs:1200,
     columns:{time:true,callsign:true,name:true,location:true,city:true,state:true,country:true,talkgroup:false,flags:true,splitLocation:false} };
-  const prefs = () => ({...prefDefaults,...settings.operation,columns:{...prefDefaults.columns,...settings.operation?.columns}});
+  const prefs = () => ({...prefDefaults,...settings.operation,voxEnabled:false,columns:{...prefDefaults.columns,...settings.operation?.columns}});
   const native = () => Boolean(mobileAudio?.isAndroid?.());
   const active = () => Boolean(mobilePttActive || mobilePttPending || (gatewayStatus.pttArmed&&!gatewayStatus.talkgroupBurstActive));
   const controls = document.querySelector('.settings-pane-container');
@@ -26,7 +26,7 @@
     <p class="hint tiny">O botão de parada de emergência permanece disponível.</p>
     ${switchRow('beepStart','Bip ao começar a falar')}${switchRow('beepStop','Bip ao parar de falar')}${switchRow('beepIncoming','Bip de chamada recebida')}
     <button id="emergencyStop" type="button" class="button danger">Parar transmissão / desativar VOX</button></div>
-    <div class="settings-card"><h3>VOX avançado</h3><button id="voxUnlock" class="button secondary" type="button">Mantenha premido durante cinco segundos para mostrar as definições de VOX</button>
+    <div class="settings-card" hidden inert style="display:none!important"><h3>VOX avançado</h3><button id="voxUnlock" class="button secondary" type="button">Mantenha premido durante cinco segundos para mostrar as definições de VOX</button>
     <div id="voxOptions" hidden><p class="hint tiny">Pode transmitir com ruído ambiente. Use auscultadores; o TOT limita cada fala. No Windows, requer acesso ao microfone e janela ativa.</p>
     ${switchRow('voxEnabled','Ativar transmissão por voz')}<label>Limiar de voz (dBFS)<input id="voxThreshold" type="number" min="-60" max="-10" value="-35"></label><label>Espera após silêncio (ms)<input id="voxHangMs" type="number" min="300" max="5000" step="100" value="1200"></label><p id="voxState" class="hint tiny">VOX desligado.</p></div></div>`;
   const displayPane=document.createElement('section');displayPane.className='settings-pane settings-grid';displayPane.dataset.settingsPane='display';displayPane.hidden=true;
@@ -57,7 +57,7 @@
       ...(['update','lookup'].includes(action)?{body:JSON.stringify({ids})}:{}),signal:AbortSignal.timeout(action==='update'?180000:10000)});
     if(!result.ok)throw new Error(result.data?.error||'A base local não está disponível.');return result.data;
   }
-  const cleanPlace = value => typeof value==='string' && /\p{L}/u.test(value) && !/^(unknown|undefined|null|n\/a|no ta|localiza[çc][ãa]o|location|cidade|city|estado|state|pa[íi]s|country|n[aã]o informad[ao]|(?:slot|ts|time\s*slot)\s*[:#-]?\s*\d+)$/i.test(value.trim())?value.trim():'';
+  const cleanPlace = value => typeof value==='string' && /\p{L}/u.test(value) && !/^(unknown|undefined|null|n\/a|no ta|localiza[çc][ãa]o|location|cidade|city|estado|state|pa[íi]s|country|n[aã]o informad[ao]|(?:slot|ts|time\s*slot)\s*[:#-]?\s*\d+)$/i.test(value.trim())?window.ZapDMROperatorIdentity.clean(value):'';
   const countryCodes=new Map([['brasil','BR'],['brazil','BR'],['usa','US'],['united states of america','US'],['uk','GB'],['england','GB']]);
   try{for(const locale of ['en','pt']){const names=new Intl.DisplayNames([locale],{type:'region'});for(let a=65;a<=90;a++)for(let b=65;b<=90;b++){const code=String.fromCharCode(a,b),name=names.of(code);if(name&&name!==code)countryCodes.set(name.toLowerCase(),code);}}}catch{}
   const flag = country => {const code=countryCodes.get(String(country).toLowerCase())||(/^[A-Za-z]{2}$/.test(country)?country.toUpperCase():'');return code?[...code].map(char=>String.fromCodePoint(127397+char.charCodeAt(0))).join(''):'';};

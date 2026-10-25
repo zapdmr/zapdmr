@@ -332,7 +332,7 @@ public final class RadioSessionService extends Service {
                 settings = new JSONObject(intent.getStringExtra("settings") == null ? "{}" : intent.getStringExtra("settings"));
                 configureBluetooth();BluetoothSppController.get(this).configure(controls());
                 mediaSession.setActive(controls().optBoolean("bluetoothPtt"));
-                if((controls().optBoolean("allowLocked")||controls().optBoolean("voxEnabled")||CarModeState.voxArmed)&&ContextCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED)
+                if((controls().optBoolean("allowLocked")||(BuildConfig.EXPERIMENTAL_CAR_VOX&&controls().optBoolean("voxEnabled"))||CarModeState.voxArmed)&&ContextCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED)
                     startForegroundCompat(NOTIFICATION_ID,notification("A iniciar escuta passiva…"),ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE|ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
                 password = intent.getStringExtra("password") == null ? "" : intent.getStringExtra("password");
                 autoReconnect = intent.getBooleanExtra("autoReconnect", false);
@@ -427,8 +427,8 @@ public final class RadioSessionService extends Service {
                 configureBluetooth();BluetoothSppController.get(this).configure(controls());
                 mediaSession.setActive(controls().optBoolean("bluetoothPtt"));
                 if(ptt.get())armTot(pttStartedAt);
-                if(CarModeState.active){startCarVoxMonitor();}else if(!controls().optBoolean("voxEnabled")){stopVoxMonitor();if(voxTransmitting)stopPtt();}else startVoxMonitor();
-                if(connected&&(controls().optBoolean("allowLocked")||controls().optBoolean("voxEnabled")||CarModeState.voxArmed)&&ContextCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED)
+                if(CarModeState.active){startCarVoxMonitor();}else if(!(BuildConfig.EXPERIMENTAL_CAR_VOX&&controls().optBoolean("voxEnabled"))){stopVoxMonitor();if(voxTransmitting)stopPtt();}else startVoxMonitor();
+                if(connected&&(controls().optBoolean("allowLocked")||(BuildConfig.EXPERIMENTAL_CAR_VOX&&controls().optBoolean("voxEnabled"))||CarModeState.voxArmed)&&ContextCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED)
                     startForegroundCompat(NOTIFICATION_ID,notification("Escuta passiva · PTT pronto"),ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE|ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
                 emitStatus();
             } catch(Exception error){emit("error",json("message","Não foi possível aplicar as opções de rádio: "+safeMessage(error)));}
@@ -467,6 +467,7 @@ public final class RadioSessionService extends Service {
     private String carVoxLastState="";
     private volatile boolean carEchoEffect,carNoiseEffect;
     private String carVoxUnavailable(){
+        if(!BuildConfig.EXPERIMENTAL_CAR_VOX)return "VOX experimental indisponível nesta candidata";
         if(!CarModeState.active)return "Modo Carro desativado";if(!CarModeState.visible)return "Interface em segundo plano";
         if(!CarModeState.voxArmed)return "VOX desligado";if(!CarModeState.voxLeaseValid(android.os.SystemClock.elapsedRealtime()))return "Heartbeat da interface expirou";
         if(destroyed||QuickExitState.blocked())return "Sessão encerrando";
@@ -512,7 +513,7 @@ public final class RadioSessionService extends Service {
     private void startVoxMonitor(){
         if(CarModeState.active){startCarVoxMonitor();return;}
         if(CarModeState.active||startupReceiveOnly||QuickExitState.blocked())return;
-        if(testingAudio.get()||pendingLinks.get()>0||voxMonitor||ptt.get()||!connected||!controls().optBoolean("voxEnabled")||!remoteAllowed()||ContextCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)return;
+        if(testingAudio.get()||pendingLinks.get()>0||voxMonitor||ptt.get()||!connected||!(BuildConfig.EXPERIMENTAL_CAR_VOX&&controls().optBoolean("voxEnabled"))||!remoteAllowed()||ContextCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)return;
         voxMonitor=true;
         new Thread(() -> {
             AudioRecord audio=null;boolean trigger=false;
@@ -523,7 +524,7 @@ public final class RadioSessionService extends Service {
                 }
             }catch(Exception error){emit("error",json("message","VOX: "+safeMessage(error)));}
             finally{voxRecorder=null;voxMonitor=false;if(audio!=null){try{audio.stop();}catch(Exception ignored){}audio.release();}}
-            if(trigger&&connected&&controls().optBoolean("voxEnabled")){controlsHandler.post(() -> {voxTransmitting=true;voxLastLoud=System.currentTimeMillis();startPtt(selectedTalkgroup,selectedSlot);if(!ptt.get())voxTransmitting=false;});}
+            if(trigger&&connected&&(BuildConfig.EXPERIMENTAL_CAR_VOX&&controls().optBoolean("voxEnabled"))){controlsHandler.post(() -> {voxTransmitting=true;voxLastLoud=System.currentTimeMillis();startPtt(selectedTalkgroup,selectedSlot);if(!ptt.get())voxTransmitting=false;});}
         },"ZapDMR-VOX").start();
     }
 
@@ -827,7 +828,7 @@ public final class RadioSessionService extends Service {
         synchronized(txCodewords){txCodewords.clear();}
         try { if(closeTransmission&&connected&&txTalkgroup>0)sendDmr(DmrFrameEngine.fullLc(txTalkgroup,Integer.parseInt(settings.getString("dmrId")),true,txPrivateCall),0x22); } catch(Exception error){Log.w(TAG,"Falha no terminador DMR",error);}
         emit("ptt",json("active",false,"direction","TX"));
-        startForegroundCompat(NOTIFICATION_ID,notification(connected?"Ligado · PTT em espera":"Ligação ZapDMR"),(controls().optBoolean("allowLocked")||controls().optBoolean("voxEnabled")||CarModeState.voxArmed)?ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE|ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE:ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
+        startForegroundCompat(NOTIFICATION_ID,notification(connected?"Ligado · PTT em espera":"Ligação ZapDMR"),(controls().optBoolean("allowLocked")||(BuildConfig.EXPERIMENTAL_CAR_VOX&&controls().optBoolean("voxEnabled"))||CarModeState.voxArmed)?ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE|ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE:ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
         } finally {txStopping=false;}
     }
 
@@ -947,7 +948,7 @@ public final class RadioSessionService extends Service {
     private void acquireWakeLock(){try{PowerManager pm=(PowerManager)getSystemService(Context.POWER_SERVICE);if(wakeLock==null){wakeLock=pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"ZapDMR:RadioSession");wakeLock.setReferenceCounted(false);}if(!wakeLock.isHeld())wakeLock.acquire();}catch(Exception error){Log.w(TAG,"Wake lock não disponível",error);}}
     private void releaseWakeLock(){try{if(wakeLock!=null&&wakeLock.isHeld())wakeLock.release();}catch(Exception ignored){} }
     private JSONObject statusData(){OpenTerminal client=terminal;return json("xlxModule",isXlx()?"C":"","protocol",useOpenTerminal()?"odtp":"hbp","reception",json("protocol",useOpenTerminal()?"odtp":"hbp","supported",useOpenTerminal()||isXlx(),"state",client!=null?client.state():isXlx()&&connected?(xlxAudioReceived?"receiving":"awaiting-audio"):useOpenTerminal()?state:connected?"unsupported":state,"targetTalkgroupId",client!=null?client.target():selectedTalkgroup,"message",client!=null?client.message():useOpenTerminal()||isXlx()?stateMessage:connected?"Homebrew/HBP não oferece inscrição sem PTT. Use ODTP num master compatível.":stateMessage),"state",state,"connected",connected,"rxBusy",receiveGuard.busy(android.os.SystemClock.elapsedRealtime()),"pttReady",connected&&vocoder!=null&&!linking.get()&&pendingLinks.get()==0,"talkgroupBurstActive",pendingLinks.get()>0,"voiceCodecAvailable",vocoder!=null,"talkgroupId",selectedTalkgroup,"target",json("id",privateTargetId>0?privateTargetId:selectedTalkgroup,"callType",privateTargetId>0?"private":"group","slot",selectedSlot),"usage",usageData(),"reconnectAttempt",reconnectAttempt,"maxReconnectAttempts",maxReconnectAttempts(),"transitionReconnect",transitionReconnect,"message",stateMessage);}
-    private void emitStatus(){emit("status",statusData());int type=ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE;if(ptt.get()||(connected&&(controls().optBoolean("allowLocked")||controls().optBoolean("voxEnabled")||CarModeState.voxArmed)&&ContextCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED))type|=ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;startForegroundCompat(NOTIFICATION_ID,notification(stateMessage),type);}
+    private void emitStatus(){emit("status",statusData());int type=ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE;if(ptt.get()||(connected&&(controls().optBoolean("allowLocked")||(BuildConfig.EXPERIMENTAL_CAR_VOX&&controls().optBoolean("voxEnabled"))||CarModeState.voxArmed)&&ContextCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED))type|=ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;startForegroundCompat(NOTIFICATION_ID,notification(stateMessage),type);}
     private void emit(String event,JSONObject data){if(destroyed)return;broadcastEvent(event,data);if(radioNotifications!=null){JSONObject entry=radioNotifications.onEvent(event,data,settings);if(entry!=null)broadcastEvent("systemLog",entry);}}
     private void broadcastEvent(String event,JSONObject data){if(destroyed&&!"quickExitResult".equals(event))return;Intent message=new Intent(ACTION_EVENT).setPackage(getPackageName()).putExtra(EXTRA_EVENT,event).putExtra(EXTRA_DATA,data==null?"{}":data.toString());sendBroadcast(message);}
     private void fail(String code,String message){state="error";stateMessage=message;emit("error",json("code",code,"message",message));emitStatus();}

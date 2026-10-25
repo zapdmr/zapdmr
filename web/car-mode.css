@@ -84,3 +84,10 @@ body.car-mode>.car-launch-status{display:none}
 }
 .car-mode-root .car-reception{min-height:0;overflow-y:auto;overscroll-behavior:contain}
 .car-mode-root .car-head>div:first-child{min-width:0}.car-mode-root .car-head strong{overflow-wrap:anywhere}.car-mode-root .car-header-actions{flex-shrink:0}
+
+/* Stabilization: experimental voice controls are never public. */
+.car-mode-root [hidden],.car-config-dialog [hidden]{display:none!important}
+.car-network{grid-template-columns:repeat(2,minmax(0,1fr))}
+.car-config-dialog h3{margin-top:22px;border-top:1px solid var(--car-line,#355348);padding-top:12px}
+
+.car-config-dialog label:has(>input[type=checkbox]){display:flex;align-items:center;gap:10px}.car-config-dialog input[type=checkbox]{width:20px;height:20px;min-height:20px;flex:0 0 20px;margin:0}.car-config-dialog summary{padding:12px 0;cursor:pointer;font-weight:700}
