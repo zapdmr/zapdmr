@@ -36,7 +36,7 @@
  class HoldPtt {
   constructor({start,stop}){this.start=start;this.stop=stop;this.pointer=null;this.pending=false;this.generation=0;}
   async down(pointer){if(this.pointer!==null||this.pending)return false;this.pointer=pointer;const generation=++this.generation;this.pending=true;
-   try{await this.start();if(generation!==this.generation||this.pointer===null)await this.stop();return generation===this.generation;}
+   try{await this.start(()=>generation===this.generation&&this.pointer!==null);if(generation!==this.generation||this.pointer===null)await this.stop();return generation===this.generation;}
    catch(e){this.pointer=null;this.generation++;await this.stop();throw e;}finally{this.pending=false;}
   }
   async up(pointer){if(pointer!==undefined&&this.pointer!==null&&pointer!==this.pointer)return;this.pointer=null;this.generation++;await this.stop();}
