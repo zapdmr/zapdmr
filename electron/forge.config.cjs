@@ -18,6 +18,7 @@ if (!requiredVocoderAssets.every((name) => fs.existsSync(path.join(vocoderAssets
 
 module.exports = {
   packagerConfig: {
+    derefSymlinks: true,
     name: 'ZapDMR',
     executableName: 'ZapDMR',
     icon: iconBase,

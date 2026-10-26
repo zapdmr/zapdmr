@@ -41,13 +41,13 @@
     "PRIVACY_EMAIL": "rizandro@gmail.com",
     "WHATSAPP_CONFIRM_NUMBER": "+5543996741200",
     "WHATSAPP_LOCAL_BRIDGE": "1",
-    "DOWNLOAD_ANDROID_URL": "https://github.com/zapdmr/zapdmr/releases/download/v1.5.2/ZapDMR-Android-1.5.2.apk",
-    "DOWNLOAD_ANDROID_BYTES": "13697209",
-    "DOWNLOAD_ANDROID_SHA256": "3b448fe8ee0bec552989fada78a416644065c485a519b9c247fcde3a2d0021ec",
-    "DOWNLOAD_WINDOWS_URL": "https://github.com/zapdmr/zapdmr/releases/download/v1.5.2/ZapDMR-Windows-1.5.2.exe",
-    "DOWNLOAD_WINDOWS_BYTES": "165343744",
-    "DOWNLOAD_WINDOWS_SHA256": "e60dc7d35e02f4ba57dbc639ae5f214c93e5bd68e6cacf6726b4f22d1af4cb30",
-    "SOURCE_URL": "https://github.com/zapdmr/zapdmr/releases/download/v1.5.2/ZapDMR-Windows-1.5.2-source.zip"
+    "DOWNLOAD_ANDROID_URL": "https://github.com/zapdmr/zapdmr/releases/download/v1.5.4/ZapDMR-Android-1.5.4.apk",
+    "DOWNLOAD_ANDROID_BYTES": "13775692",
+    "DOWNLOAD_ANDROID_SHA256": "5ec554174d6c6d537b76791043aab34af9be611d72d703d188996d7c7bfcee58",
+    "DOWNLOAD_WINDOWS_URL": "https://github.com/zapdmr/zapdmr/releases/download/v1.5.4/ZapDMR-Windows-1.5.4.exe",
+    "DOWNLOAD_WINDOWS_BYTES": "165367808",
+    "DOWNLOAD_WINDOWS_SHA256": "a0059f97d4dac98b4f94f8041fff0db6be7507ed1d36e52dfd9d3fb2bbaba045",
+    "SOURCE_URL": "https://github.com/zapdmr/zapdmr/releases/download/v1.5.4/ZapDMR-Windows-1.5.4-source.zip"
   },
   "triggers": {
     "crons": [

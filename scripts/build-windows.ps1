@@ -1,4 +1,4 @@
-param([switch]$SkipInstall)
+param([switch]$SkipInstall,[switch]$SkipNativeBuild,[switch]$SkipPackage)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 
@@ -9,7 +9,8 @@ $nodeMajor = [int]($nodeVersion.TrimStart('v').Split('.')[0])
 if ($nodeMajor -lt 22) { throw "Node.js 22+ necessário; encontrado $nodeVersion." }
 
 $audioSidecar = Join-Path $PSScriptRoot '..\native\build\audio-sidecar-vs2022\bin\ZapDMRAudio.exe'
-if (-not (Test-Path -LiteralPath $audioSidecar -PathType Leaf) -or (Get-Item (Join-Path $projectRoot 'native/audio-sidecar/src/main.cpp')).LastWriteTimeUtc -gt (Get-Item $audioSidecar -ErrorAction SilentlyContinue).LastWriteTimeUtc) {
+if ($SkipNativeBuild -and -not (Test-Path -LiteralPath $audioSidecar -PathType Leaf)) { throw 'Helper nativo existente ausente.' }
+if (-not $SkipNativeBuild -and (-not (Test-Path -LiteralPath $audioSidecar -PathType Leaf) -or (Get-Item (Join-Path $projectRoot 'native/audio-sidecar/src/main.cpp')).LastWriteTimeUtc -gt (Get-Item $audioSidecar -ErrorAction SilentlyContinue).LastWriteTimeUtc)) {
   & (Join-Path $PSScriptRoot 'build-audio-sidecar.ps1')
   if ($LASTEXITCODE -ne 0) { throw 'A compilação do ZapDMRAudio falhou.' }
 }
@@ -45,15 +46,17 @@ try {
     & npm.cmd install
     if ($LASTEXITCODE -ne 0) { throw 'npm install falhou.' }
   }
-  & npm.cmd run package:win
-  if ($LASTEXITCODE -ne 0) { throw 'A compilação do servidor ou o empacotamento Electron Forge falhou.' }
+  if (-not $SkipPackage) {
+    & npm.cmd run package:win
+    if ($LASTEXITCODE -ne 0) { throw 'A compilação do servidor ou o empacotamento Electron Forge falhou.' }
+  }
 
   Add-Type -AssemblyName System.IO.Compression
   Add-Type -AssemblyName System.IO.Compression.FileSystem
 
   $package = Get-Content -LiteralPath (Join-Path $projectRoot 'package.json') -Raw | ConvertFrom-Json
   $appDirectory = Join-Path $projectRoot 'out\ZapDMR-win32-x64'
-  $releaseDirectory = Join-Path $projectRoot 'out\make\squirrel.windows\x64'
+  $releaseDirectory = Join-Path $projectRoot ('out\make\squirrel.windows\'+$package.version+'-'+[guid]::NewGuid().ToString('N')+'\x64')
   $vendorDirectory = Join-Path $projectRoot 'node_modules\electron-winstaller\vendor'
   $squirrelExe = Join-Path $vendorDirectory 'Squirrel.exe'
   $setupIcon = Join-Path $projectRoot 'assets\ZapDMR.ico'

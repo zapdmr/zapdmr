@@ -91,3 +91,6 @@ body.car-mode>.car-launch-status{display:none}
 .car-config-dialog h3{margin-top:22px;border-top:1px solid var(--car-line,#355348);padding-top:12px}
 
 .car-config-dialog label:has(>input[type=checkbox]){display:flex;align-items:center;gap:10px}.car-config-dialog input[type=checkbox]{width:20px;height:20px;min-height:20px;flex:0 0 20px;margin:0}.car-config-dialog summary{padding:12px 0;cursor:pointer;font-weight:700}
+
+/* Windows keeps its three-button normal navigation. */
+#openCarModeHome[hidden]{display:none!important}
