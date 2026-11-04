@@ -19,9 +19,12 @@
   let latest=[],history=[];
 
   function setMode(next){
-    mode=next==='cards'?'cards':'list';cards.hidden=false;tableWrap.hidden=true;cards.dataset.view=mode;
+    mode=next==='cards'?'cards':'list';
+    const desktop=window.matchMedia('(min-width: 761px)').matches;
+    const showTable=desktop&&mode==='list';
+    cards.hidden=showTable;tableWrap.hidden=!showTable;cards.dataset.view=mode;
   }
-  function setFontSize(next){fontSize=['small','large'].includes(next)?next:'normal';cards.dataset.fontSize=fontSize;}
+  function setFontSize(next){fontSize=['small','large'].includes(next)?next:'normal';cards.dataset.fontSize=fontSize;tableWrap.dataset.fontSize=fontSize;}
 
   function render(items=[]){
     history=items.slice();const seen=new Set();latest=history.filter(item=>{const key=identity(item);if(!key||seen.has(key))return false;seen.add(key);return true;});
@@ -51,6 +54,7 @@
     setMode(mode);
   }
   setMode(mode);setFontSize(fontSize);
+  window.matchMedia('(min-width: 761px)').addEventListener('change',()=>setMode(mode));
   document.getElementById('topSettings').onclick=()=>{setActiveScreen('settings');setActiveSettingsPane('display');};
   document.getElementById('homeButton').onclick=event=>{event.preventDefault();setActiveScreen('ptt');};
   document.getElementById('selectedTalkgroupCard').onclick=()=>document.getElementById('quickTalkgroupSelect').click();

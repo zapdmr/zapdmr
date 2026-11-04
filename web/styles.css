@@ -504,3 +504,26 @@ body>.toast.show{transform:translate(-50%,0)}
 @media(max-width:370px){.operation-status>span:not(.badge){display:none}.operation-status{grid-template-columns:1fr auto auto}.operation-card .quick-catalog-hint{display:none}.participant-card-info{grid-template-columns:minmax(62px,.8fr) minmax(0,1fr)}.participant-card-info strong{font-size:13px}.bottom-nav{grid-template-columns:68px minmax(0,1fr) 68px}}
 .operation-card .selected{display:flex!important;order:initial!important}
 #screen-settings,.settings-layout,.settings-tabs,.settings-pane-container{min-width:0;max-width:100%}#screen-settings{overflow-x:hidden}.participant-card-info span{font-size:12px}.participant-card-info small{font-size:9px}
+
+/* Final responsive split: Windows retains its approved two-column console;
+   Android keeps the compact vertical console above. */
+.participant-cards-list[hidden],.participant-table-wrap[hidden]{display:none!important}
+@media(min-width:761px){
+ .container{padding:12px 0}
+ .ptt-layout{grid-template-columns:minmax(340px,.88fr) minmax(0,1.45fr)!important;grid-template-rows:minmax(0,1fr)!important;gap:14px!important}
+ .operation-card{display:flex!important;flex-direction:column;gap:8px!important;padding:clamp(13px,1.6vw,20px)!important;overflow-x:hidden;overflow-y:auto}
+ .operation-card .operation-status{order:0}
+ .operation-card .selected{order:1!important}
+ .operation-card .passive-scan-card{order:2}
+ .operation-card .quick-talkgroup-catalog{order:3}
+ .operation-card #audioMeters{order:4;flex:0 0 auto;margin-top:auto;min-height:54px}
+ .operation-card .tot-state{order:5}.operation-card .operation-hint{order:6}
+ .participants-card{padding:clamp(13px,1.6vw,20px)!important}
+ .participant-table-wrap:not([hidden]){display:block!important;flex:1;min-height:0;max-height:none;margin-top:12px;overflow-x:hidden;overflow-y:auto}
+ .participant-table{width:100%;min-width:0;table-layout:fixed;font-size:11px}
+ .participant-table th,.participant-table td{height:auto;padding:8px 7px;line-height:1.35}
+ .participant-table-wrap[data-font-size=small] .participant-table{font-size:10px}
+ .participant-table-wrap[data-font-size=large] .participant-table{font-size:13px}
+ .participant-cards-list:not([hidden]){display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-content:start}
+ .participant-cards-list[data-view=cards] .participant-card{min-height:86px}
+}

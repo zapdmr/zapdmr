@@ -37,6 +37,7 @@ body.car-mode>.car-launch-status{display:none}
 #screen-ptt .participant-table td[data-column="name"],#screen-ptt .participant-table td[data-column="location"]{white-space:normal;overflow-wrap:anywhere}
 :root{--bottom-nav-height:92px}
 @media(max-width:760px){:root{--bottom-nav-height:86px}}
+@media(min-width:761px){:root{--bottom-nav-height:72px}}
 .bottom-nav[data-car-navigation] .bottom-nav-button span{overflow-wrap:anywhere}
 @media(orientation:landscape) and (min-width:600px) and (max-height:540px){
  #screen-ptt{height:100%;min-height:0;overflow:hidden}
