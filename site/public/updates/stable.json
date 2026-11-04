@@ -8,43 +8,43 @@
   "platforms": {
     "android": {
       "platform": "android",
-      "version": "1.5.4",
-      "versionCode": 26,
+      "version": "1.5.6",
+      "versionCode": 28,
       "minSupportedCode": 0,
       "requiredReason": "",
       "critical": false,
       "channel": "stable",
-      "publishedAt": "2026-10-26T01:00:06.782306Z",
-      "changelog": "Modo Carro opcional no Android, PTT por dois toques, VOX desativado, ganho TX do carro 260% (0–300%), configuração XLX026 por código do site. Preserva perfis, áudio RX e atualizadores. Instale por cima, sem desinstalar. Windows mantém sua interface normal.",
-      "apkUrl": "https://github.com/zapdmr/zapdmr/releases/download/v1.5.4/ZapDMR-Android-1.5.4.apk",
-      "bytes": 13775692,
-      "sha256": "5ec554174d6c6d537b76791043aab34af9be611d72d703d188996d7c7bfcee58"
+      "publishedAt": "2026-11-04T18:49:40.3501093Z",
+      "changelog": "Correção definitiva do APRS-IS: provisionamento automático para cadastro oficial validado, persistência protegida do Passcode automático ou manual e reconexão após reiniciar. Preserva perfis, configurações, mensagens, DMR, XLX026, Modo Carro e ZapChat. Instale por cima, sem desinstalar.",
+      "apkUrl": "https://github.com/zapdmr/zapdmr/releases/download/v1.5.6/ZapDMR-Android-1.5.6.apk",
+      "bytes": 13779788,
+      "sha256": "7974f7b7049878cd790483c18ca963fb86dd4ffb5fd47abcaf039453d470b8d3"
     },
     "windows": {
       "platform": "windows",
-      "version": "1.5.4",
+      "version": "1.5.6",
       "minSupportedVersion": "1.4.8",
       "critical": false,
       "channel": "stable",
-      "publishedAt": "2026-10-26T01:00:06.782306Z",
-      "changelog": "Modo Carro opcional no Android, PTT por dois toques, VOX desativado, ganho TX do carro 260% (0–300%), configuração XLX026 por código do site. Preserva perfis, áudio RX e atualizadores. Instale por cima, sem desinstalar. Windows mantém sua interface normal.",
+      "publishedAt": "2026-11-04T18:49:40.3501093Z",
+      "changelog": "Correção definitiva do APRS-IS: provisionamento automático para cadastro oficial validado, persistência protegida do Passcode automático ou manual e reconexão após reiniciar. Preserva perfis, configurações, mensagens, DMR, XLX026, Modo Carro e ZapChat. Instale por cima, sem desinstalar.",
       "installer": {
-        "name": "ZapDMR-Windows-1.5.4.exe",
-        "url": "https://github.com/zapdmr/zapdmr/releases/download/v1.5.4/ZapDMR-Windows-1.5.4.exe",
-        "bytes": 165367808,
-        "sha256": "a0059f97d4dac98b4f94f8041fff0db6be7507ed1d36e52dfd9d3fb2bbaba045"
+        "name": "ZapDMR-Windows-1.5.6.exe",
+        "url": "https://github.com/zapdmr/zapdmr/releases/download/v1.5.6/ZapDMR-Windows-1.5.6.exe",
+        "bytes": 165372416,
+        "sha256": "99a07a14583391e9ec6afd0e5612bf814e2008c03695eb48c8c94b971fdbf500"
       },
       "package": {
-        "name": "zapdmr-1.5.4-full.nupkg",
-        "url": "https://github.com/zapdmr/zapdmr/releases/download/v1.5.4/zapdmr-1.5.4-full.nupkg",
-        "bytes": 164335328,
-        "sha256": "9ee9de2a79bf68d0aa309c8ada3d516a411b4274dfd2329d43394dfe05e347fe"
+        "name": "zapdmr-1.5.6-full.nupkg",
+        "url": "https://github.com/zapdmr/zapdmr/releases/download/v1.5.6/zapdmr-1.5.6-full.nupkg",
+        "bytes": 164338523,
+        "sha256": "680004fc5f2f59cb8d26524e1cb5662311a40dfc5e98438b8861f96f195a094b"
       },
       "manifest": {
         "name": "RELEASES",
-        "url": "https://github.com/zapdmr/zapdmr/releases/download/v1.5.4/RELEASES",
+        "url": "https://github.com/zapdmr/zapdmr/releases/download/v1.5.6/RELEASES",
         "bytes": 75,
-        "sha256": "32075bcd24181211e463884ed247aec3cabccfd644ec46795ace63bfb676c77e"
+        "sha256": "03e459550076eca75da4c91e31a28738816c0840fc3be26602371a4a3011618d"
       }
     }
   }
