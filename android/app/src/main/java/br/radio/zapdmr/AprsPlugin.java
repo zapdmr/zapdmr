@@ -49,6 +49,7 @@ public final class AprsPlugin extends Plugin {
     @PluginMethod public void connect(PluginCall call){
         try{
             JSONObject config=AprsService.cleanConfig(call.getObject("config",new JSObject()));AprsCredentialStore.Resolved credential=AprsCredentialStore.resolve(getContext(),config.getString("callsign"),call.getString("manualPasscode",""));AprsService.validatePasscode(credential.passcode);
+            if(credential.source.isEmpty())throw new IllegalStateException("Credencial APRS indisponível. Confirme que o cadastro oficial deste indicativo e Radio ID está autenticado e com WhatsApp validado, ou informe o passcode manual.");
             Intent intent=new Intent(getContext(),AprsService.class).setAction(AprsService.CONNECT).putExtra("config",config.toString()).putExtra("passcode",credential.passcode).putExtra("credential",credential.passcode.equals("-1")?"":credential.json().toString());
             // This method is invoked from a visible screen; Android permits foreground GPS promotion here.
             getActivity().runOnUiThread(()->{try{ContextCompat.startForegroundService(getContext(),intent);call.resolve(new JSObject().put("accepted",true).put("state","connecting"));}catch(Exception error){call.reject("Não foi possível iniciar a sessão APRS-IS.","APRS_START_FAILED",error);}});

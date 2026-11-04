@@ -436,8 +436,9 @@ export async function startServer(options: StartOptions = {}) {
     if(manual){if(!/^\d{1,5}$/.test(manual))throw new Error('O passcode APRS-IS manual deve conter de 1 a 5 algarismos.');credential={callsign:base,passcode:manual,source:'manual'};}
     else if(aprsCredential?.callsign===base)credential=aprsCredential;
     else if(automaticAprsAuthorized(settings,communityProfile,base))credential={callsign:base,passcode:String(aprsPasscode(base)),source:'automatic'};
+    if(!credential)throw new Error('Credencial APRS indisponível. Confirme que o cadastro oficial deste indicativo e Radio ID está autenticado e com WhatsApp validado, ou informe o passcode manual.');
     pendingAprsCredential=credential&&(!aprsCredential||aprsCredential.callsign!==credential.callsign||aprsCredential.passcode!==credential.passcode||aprsCredential.source!==credential.source)?credential:undefined;
-    return aprs.connect(config,credential?.passcode||'-1');
+    return aprs.connect(config,credential.passcode);
   };
   aprs.on('status',data=>{
     if((data as any)?.verified&&pendingAprsCredential){

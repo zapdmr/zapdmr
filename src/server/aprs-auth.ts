@@ -29,7 +29,9 @@ export function automaticAprsAuthorized(
   const account = community?.account;
   const profileCallsign = aprsBaseCallsign(settings.callsign);
   return Boolean(
-    account?.verified === true &&
+    String(community?.endpoint ?? '').replace(/\/$/, '') === 'https://www.zapdmr.com.br' &&
+    typeof community?.token === 'string' && community.token.length > 0 &&
+    account?.verified !== false &&
     account?.whatsapp_verified === true &&
     profileCallsign &&
     profileCallsign === aprsBaseCallsign(requestedCallsign) &&

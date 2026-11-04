@@ -15,7 +15,7 @@ const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
  const api=async(route,body,method=body===undefined?'GET':'POST')=>{const response=await fetch(app.url+route,{method,headers:{'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});return {status:response.status,data:await response.json()};};
  try{
   await open();const initial=(await api('/api/settings')).data;
-  await api('/api/community-profile',{phone:'+5541999999999',endpoint:'https://www.zapdmr.com.br',account:{verified:true,whatsapp_verified:true,callsign:'PU5RZS',dmrId:'7240001'}});
+  await api('/api/community-profile',{phone:'+5541999999999',endpoint:'https://www.zapdmr.com.br',token:'fixture-session',account:{whatsapp_verified:true,callsign:'PU5RZS',dmrId:'7240001'}});
   const enabled={...initial,callsign:'PU5RZS',dmrId:'7240001',autoConnectOnStartup:false,autoReconnect:false,console:{...(initial.console||{}),aprs:{enabled:true,callsign:'',ssid:0,host:'127.0.0.1',port:aprsPort,messages:true,positionEnabled:false,intervalMinutes:5,smartBeaconing:false,symbol:'['}}};
   assert.equal((await api('/api/settings',enabled)).status,200);
   assert.equal((await api('/api/aprs/connect',{config:{callsign:'PU5RZS',host:'127.0.0.1',port:aprsPort}})).status,200);
@@ -25,8 +25,15 @@ const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   const backup=(await api('/api/backup')).data;assert.equal(backup.version,3);assert.ok(backup.profiles[0].protectedAprsCredential);
   await app.close();app=null;await open();const reopened=(await api('/api/settings')).data;assert.equal(reopened.console.aprs.enabled,true);assert.equal(reopened.console.aprs.ssid,0);
   assert.equal((await api('/api/aprs/connect',{config:{callsign:'PU5RZS',host:'127.0.0.1',port:aprsPort}})).status,200,'credencial recuperada sem formulário');
-  const disabled={...reopened,console:{...reopened.console,aprs:{...reopened.console.aprs,enabled:false}}};assert.equal((await api('/api/settings',disabled)).status,200);await api('/api/aprs/disconnect',{});
+  assert.equal((await api('/api/aprs/connect',{config:{callsign:'PU5RZS',host:'127.0.0.1',port:aprsPort},manualPasscode:'12345'})).status,200);
+  for(let i=0;i<30;i++){const status=(await api('/api/aprs')).data;if(status.verified&&status.credentialSource==='manual')break;await delay(100);}
+  assert.equal((await api('/api/aprs')).data.credentialSource,'manual','passcode manual confirmado substitui a credencial do perfil');
+  await app.close();app=null;await open();
+  assert.equal((await api('/api/aprs/connect',{config:{callsign:'PU5RZS',host:'127.0.0.1',port:aprsPort}})).status,200,'passcode manual protegido é recuperado após reiniciar');
+  assert.equal(JSON.parse(await loadWindowsSecret(secretPath)).passcode,'12345');
+  const reopenedManual=(await api('/api/settings')).data;
+  const disabled={...reopenedManual,console:{...reopenedManual.console,aprs:{...reopenedManual.console.aprs,enabled:false}}};assert.equal((await api('/api/settings',disabled)).status,200);await api('/api/aprs/disconnect',{});
   await app.close();app=null;await open();assert.equal((await api('/api/settings')).data.console.aprs.enabled,false,'desligado permanece desligado');assert.equal((await api('/api/aprs')).data.state,'disconnected');
-  console.log('PASS APRS Windows persistence: protected passcode, enabled/disabled restart, stored reconnect, SSID 0 and backup v3.');
+  console.log('PASS APRS Windows persistence: automatic legacy authorization, protected automatic/manual passcodes, enabled/disabled restart, stored reconnect, SSID 0 and backup v3.');
  }finally{await app?.close();await new Promise(resolve=>aprs.close(resolve));await fs.rm(root,{recursive:true,force:true});}
 })().catch(error=>{console.error(error);process.exitCode=1;});
