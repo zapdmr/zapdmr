@@ -19,8 +19,8 @@ if (!requiredVocoderAssets.every((name) => fs.existsSync(path.join(vocoderAssets
 module.exports = {
   packagerConfig: {
     derefSymlinks: true,
-    name: 'ZapDMR',
-    executableName: 'ZapDMR',
+    name: 'ZapDMRHomePreview',
+    executableName: 'ZapDMRHomePreview',
     icon: iconBase,
     asar: true,
     ignore: (file) => {
@@ -39,11 +39,11 @@ module.exports = {
   makers: [{
     name: '@electron-forge/maker-squirrel',
     config: {
-      name: 'zapdmr',
+      name: 'zapdmrhomepreview',
       authors: 'ZapDMR',
       description: 'Painel DMR e ligação HBP para BrandMeister',
-      title: 'ZapDMR',
-      setupExe: 'ZapDMR-Setup.exe',
+      title: 'ZapDMR Home Preview',
+      setupExe: 'ZapDMR-Home-Preview-Setup.exe',
       setupIcon: iconIco,
       noMsi: true
     }

@@ -373,8 +373,10 @@ function renderParticipants() {
   if (window.ZapDMROperation) return window.ZapDMROperation.renderParticipants();
   const selectedId = Number(groupSelected()?.id);
   const cutoff = Date.now() - 30 * 60 * 1000;
-  const current = participants.filter((item) => Number(item.talkgroupId) === selectedId && Number(item.at) >= cutoff)
-    .sort((left, right) => Number(right.at) - Number(left.at)).slice(0, 50);
+  const history = participants.filter((item) => Number(item.talkgroupId) === selectedId && Number(item.at) >= cutoff)
+    .sort((left, right) => Number(right.at) - Number(left.at));
+  const seen=new Set(),current=history.filter(item=>{const key=String(item.sourceId||item.id||item.callsign||'').toUpperCase();if(!key||seen.has(key))return false;seen.add(key);return true;});
+  if(window.ZapDMRHome)window.ZapDMRHome.renderParticipants(history);
   const body = $('#participantsRows');
   body.replaceChildren();
   for (const item of current) {
@@ -839,8 +841,9 @@ function handleMobileRadioEvent(packet) {
     const source = data.sourceId ? String(data.sourceId) : '';
     if (source && Number(data.talkgroupId) === Number(settings.selectedTalkgroupId)) {
       const participantKey = `mobile:${source}`;
+      const oldestUseful=Date.now()-2*60*60*1000;
       participants = [{ key: participantKey, at: Number(data.lastActivityAt) || Date.now(), talkgroupId: Number(data.talkgroupId),
-        callsign: data.lastCallerCallsign || `DMR ${source}`, name: data.lastCallerName || 'Estação recebida', sourceId: source, location: data.location || '—', country: data.country || '' }, ...participants.filter((item) => item.key !== participantKey)].slice(0, 30);
+        callsign: data.lastCallerCallsign || `DMR ${source}`, name: data.lastCallerName || 'Estação recebida', sourceId: source, location: data.location || '', country: data.country || '' }, ...participants.filter((item) => item.key !== participantKey&&Number(item.at)>=oldestUseful)];
       renderParticipants();
     }
   }

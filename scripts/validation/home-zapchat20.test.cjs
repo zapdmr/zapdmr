@@ -1,0 +1,23 @@
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const path=require('node:path');
+const cp=require('node:child_process');
+const root=path.resolve(__dirname,'../..');
+const read=name=>fs.readFileSync(path.join(root,name),'utf8');
+const index=read('web/index.html'),home=read('web/home-modern.js'),styles=read('web/styles.css');
+const operation=read('web/operation-controls.js'),app=read('web/app.js'),actions=read('web/participant-actions.js');
+const chat=read('web/chat-alerts.js'),consoleJs=read('web/radio-console.js');
+const gradle=read('android/app/build.gradle'),forge=read('electron/forge.config.cjs'),pkg=require(path.join(root,'package.json'));
+
+assert.match(index,/participantCardsView/);assert.match(index,/participantCompactView/);assert.match(index,/participantCardsList/);
+assert.match(home,/zapdmr-participant-view/);assert.match(home,/DocumentFragment|createDocumentFragment/);assert.match(home,/seen\.has/);
+assert.match(operation,/seen=new Set/);assert.match(app,/seen=new Set/);
+assert.doesNotMatch(operation,/slice\(0\s*,\s*50\)/);assert.doesNotMatch(app,/slice\(0\s*,\s*(?:30|50)\)/);
+assert.match(styles,/grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/);
+assert.match(consoleJs,/rc-top-contact[\s\S]*<svg/);assert.doesNotMatch(consoleJs,/button\('✉','rc-top-contact'\)/);
+assert.match(chat,/Abrir ZapChat ·/);assert.match(actions,/Informações da rodada/);assert.match(actions,/Chamada privada/);assert.match(actions,/QRZ\.com/);assert.match(actions,/ZapChat/);
+assert.match(operation,/gatewayStatus\.rxBusy/);assert.match(operation,/RX OCUPADO/);
+assert.equal(pkg.version,'2.0.0');assert.equal(pkg.productName,'ZapDMR Home Preview');assert.match(gradle,/applicationIdSuffix "\.homepreview"/);assert.match(gradle,/versionCode 20001/);assert.match(forge,/zapdmrhomepreview/);
+const changed=cp.execFileSync('git',['diff','--name-only','checkpoint/home-zapchat-before-2.0'],{cwd:root,encoding:'utf8'}).trim().split(/\r?\n/).filter(Boolean);
+for(const protectedPath of ['site/public/updates/stable.json','android/app/src/main/java/br/radio/zapdmr/AprsService.java','web/app-updater.js','electron/windows-updater.cjs'])assert(!changed.includes(protectedPath),protectedPath+' must remain untouched');
+console.log('PASS Home/ZapChat 2.0 contract: dual Last Heard views, no 30/50 visual cap, details, ZapChat badge, RX/PTT contract, four-item navigation, isolated packages and stable/APRS files untouched.');

@@ -136,3 +136,4 @@
 
 .ptt-large.tot-warning{animation:tot-pulse .65s ease-in-out infinite}@keyframes tot-pulse{50%{background:#df5b15;box-shadow:0 0 0 4px #f39b3960}}
 @media(prefers-reduced-motion:reduce){.ptt-large.tot-warning{animation:none;outline:3px solid #df5b15}}
+.rc-top-contact{position:relative;display:grid;place-items:center}.rc-top-contact svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}.chat-unread-badge{position:absolute;top:-6px;right:-7px;display:grid;place-items:center;min-width:17px;height:17px;padding:0 4px;border:2px solid var(--surface);border-radius:12px;background:#ff334f;color:#fff;font-size:8px;font-weight:900}.chat-unread-badge[hidden]{display:none}

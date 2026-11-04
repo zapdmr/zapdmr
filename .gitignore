@@ -17,6 +17,7 @@ data/settings.json
 .android-signing/
 .gradle-user-home/
 .java-user-home/
+.tools/
 .android/
 work/
 native/**/build-*/
