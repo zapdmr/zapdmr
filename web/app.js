@@ -195,7 +195,7 @@ function groupSelected() {
 function setTheme(value) {
   settings.theme = value;
   document.documentElement.dataset.theme = value;
-  $('#theme').value = value;
+  const themeControl=$('#theme');if(themeControl)themeControl.value = value;
   saveLocal();
 }
 
@@ -355,13 +355,16 @@ function renderSelected() {
   if (!group) return;
   $('#pttScreenTitle').textContent='TalkGroup ativa';
   $('#selectedId').textContent = `TG ${group.id}`;
+  const operationNetwork=$('#operationNetwork'),operationTalkgroup=$('#operationTalkgroup');
+  if(operationNetwork)operationNetwork.textContent=isXlx()?`XLX026${settings.xlxModule?' · '+settings.xlxModule:''}`:'DMR';
+  if(operationTalkgroup)operationTalkgroup.textContent=`TG ${group.id}`;
   $('#selectedName').textContent = group.name;
   $('#selectedMeta').textContent = [group.slot ? `TS ${group.slot}` : 'Slot não indicado', group.note].filter(Boolean).join(' · ');
   const selectedCaller = $('#selectedCaller');
   selectedCaller.textContent = callerLabel(group.id);
   selectedCaller.hidden = !selectedCaller.textContent;
   $('#selectedCategory').textContent = categoryName(catalogCategory(group));
-  $('#favoriteSelected').textContent = settings.favorites.includes(group.id) ? '★' : '☆';
+  if($('#favoriteSelected'))$('#favoriteSelected').textContent = settings.favorites.includes(group.id) ? '★' : '☆';
   updateQuickTalkgroupIndicators();
   $('#selectedActivityLed').dataset.talkgroupId = String(group.id);
   setLedState($('#selectedActivityLed'), hasRecentActivity(group.id));
@@ -1055,8 +1058,8 @@ $('#expandCatalog').onclick = () => {
   $('#expandCatalog').setAttribute('aria-label', expanded ? 'Mostrar ligação e favoritos' : 'Ampliar catálogo');
   $('#expandCatalog').textContent = expanded ? '↙' : '⛶';
 };
-$('#theme').onchange = async (event) => { setTheme(event.target.value); await persist(); };
-$('#favoriteSelected').onclick = () => { const group = groupSelected(); if (group) toggleFavorite(group.id); };
+if($('#theme'))$('#theme').onchange = async (event) => { setTheme(event.target.value); await persist(); };
+if($('#favoriteSelected'))$('#favoriteSelected').onclick = () => { const group = groupSelected(); if (group) toggleFavorite(group.id); };
 document.querySelectorAll('.bottom-nav-button[data-screen]').forEach((button) => {
   button.onclick = () => setActiveScreen(button.dataset.screen);
 });

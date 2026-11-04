@@ -1,10 +1,10 @@
 /* Shared operational settings for the native Android client and Electron. */
 (() => {
-  const prefDefaults = { rxProtectionMs:500, pttMode:'toggle', hardwareKey:'F9', bluetoothPtt:false, allowLocked:false,
+  const prefDefaults = { rxProtectionMs:500, pttMode:'hold', participantView:'list', participantFontSize:'normal', hardwareKey:'F9', bluetoothPtt:false, allowLocked:false,
     hidePttButton:false, beepStart:false, beepStop:false, beepIncoming:false, keepScreenOn:false,
     hideStatusBar:false, showMeters:true, voxEnabled:false, voxThreshold:-35, voxHangMs:1200,
     columns:{time:true,callsign:true,name:true,location:true,city:true,state:true,country:true,talkgroup:false,flags:true,splitLocation:false} };
-  const prefs = () => ({...prefDefaults,...settings.operation,voxEnabled:false,columns:{...prefDefaults.columns,...settings.operation?.columns}});
+  const prefs = () => ({...prefDefaults,...settings.operation,pttMode:'hold',voxEnabled:false,columns:{...prefDefaults.columns,...settings.operation?.columns}});
   const native = () => Boolean(mobileAudio?.isAndroid?.());
   const active = () => Boolean(mobilePttActive || mobilePttPending || (gatewayStatus.pttArmed&&!gatewayStatus.talkgroupBurstActive));
   const controls = document.querySelector('.settings-pane-container');
@@ -16,7 +16,7 @@
   }
   const pttPane=document.createElement('section');pttPane.className='settings-pane settings-grid';pttPane.dataset.settingsPane='ptt-options';pttPane.hidden=true;
   pttPane.innerHTML=`<div class="settings-card"><h3>Premir para falar</h3><p class="hint tiny">Modo, botões, tons</p>
-    <label>Modo do botão de falar<select id="pttMode"><option value="toggle">Tocar — um toque liga, outro desliga</option><option value="hold">Manter — manter premido para transmitir</option></select></label>
+    <p class="hint">PTT momentâneo: mantenha premido para transmitir e solte para encerrar.</p>
     <label>Mapeamento do botão físico<select id="hardwareKey"><option value="F9">F9</option><option value="VolumeUp">Volume + (Android)</option><option value="VolumeDown">Volume − (Android)</option></select></label>
     <label>Proteção após RX no Android (ms)<input id="rxProtectionMs" type="number" min="0" max="3000" step="100" ${native()?'':'disabled'}></label><p class="hint tiny">No Android, este ajuste controla a proteção após RX local. No Windows, o bloqueio acompanha a recepção e a reprodução, com proteção mínima de 500 ms após a fala. Não garante que toda a rede esteja livre.</p>
     ${switchRow('bluetoothPtt','PTT Bluetooth / botão de auscultadores')}
@@ -32,7 +32,8 @@
   const displayPane=document.createElement('section');displayPane.className='settings-pane settings-grid';displayPane.dataset.settingsPane='display';displayPane.hidden=true;
   displayPane.innerHTML=`<div class="settings-card"><h3>Ecrã e energia</h3><p class="hint tiny">Tema, manter ecrã ligado, barra de estado</p>
     <label>Tema<select id="operationTheme"><option value="auto">Automático</option><option value="light">Claro</option><option value="dark">Escuro</option></select></label>
-    ${switchRow('keepScreenOn','Manter ecrã ligado')}${switchRow('hideStatusBar','Ocultar barra de estado / título')}${switchRow('showMeters','Medidores TX/RX em tempo real')}
+    <label>Participantes da Rodada<select id="participantView"><option value="list">Lista</option><option value="cards">Cartões</option></select></label><label>Tamanho das letras<select id="participantFontSize"><option value="small">Pequeno</option><option value="normal">Normal</option><option value="large">Grande</option></select></label>
+    ${switchRow('keepScreenOn','Manter ecrã ligado')}${switchRow('hideStatusBar','Ocultar barra de estado / título')}${switchRow('showMeters','Medidores RX/TX em tempo real')}
     <button id="batterySettings" type="button" class="button secondary">Gerir otimizações de bateria (Android)</button><p class="hint tiny">A exceção é escolhida nas definições do Android. No Windows, o bloqueio de suspensão usa a gestão de energia do sistema.</p></div>
     <div class="settings-card"><h3>Colunas do registo de chamadas</h3><div id="columnOptions"></div><p class="hint tiny">Localização cadastral DMR ID, não GPS. Dados ausentes aparecem como não informados.</p><div class="column-preview"><table><thead id="columnPreviewHead"></thead><tbody id="columnPreviewBody"></tbody></table></div></div>`;
   controls.append(pttPane,displayPane);
@@ -119,22 +120,22 @@
       }
     }catch(error){wantTransmit=false;mobilePttHolding=false;mobilePttPending=false;if(native())void mobileAudio.stopPtt();toast(error.message);}finally{pttBusy=false;}
   }
-  function reflectTx(){const tx=active();if(!tx&&gatewayStatus.rxBusy)wantTransmit=false;$('#ptt').classList.toggle('rx-blocked',!tx&&Boolean(gatewayStatus.rxBusy));$('#ptt').setAttribute('aria-label',!tx&&gatewayStatus.rxBusy?'PTT bloqueado durante recepção e proteção após RX':'Premir para falar');if(tx!==lastTxState){if(!native()&&(tx?prefs().beepStart:prefs().beepStop))beep();lastTxState=tx;}
-    $('#ptt').classList.toggle('transmitting',tx);$('#ptt').disabled=!tx&&(!gatewayStatus.connected||!gatewayStatus.pttReady||Boolean(gatewayStatus.rxBusy)||Boolean(gatewayStatus.talkgroupBurstActive));$('#ptt').textContent=!tx&&gatewayStatus.rxBusy?'RX OCUPADO — AGUARDE':tx?'■ TX · transmitir / parar':prefs().pttMode==='toggle'?'🎙 TX · tocar para falar':'🎙 TX · manter para falar';$('#ptt').hidden=prefs().hidePttButton&&!tx;}
+  function reflectTx(){const tx=active(),rxBlocked=!tx&&Boolean(gatewayStatus.rxBusy),unavailable=!tx&&(!gatewayStatus.connected||!gatewayStatus.pttReady||Boolean(gatewayStatus.talkgroupBurstActive));if(rxBlocked)wantTransmit=false;const button=$('#ptt');button.classList.toggle('rx-blocked',rxBlocked);button.classList.toggle('transmitting',tx);button.classList.toggle('unavailable',unavailable&&!rxBlocked);button.setAttribute('aria-label',rxBlocked?'PTT bloqueado durante recepção e proteção após RX':unavailable?'PTT indisponível enquanto o rádio está desconectado':'Mantenha premido para falar');if(tx!==lastTxState){if(!native()&&(tx?prefs().beepStart:prefs().beepStop))beep();lastTxState=tx;}
+    button.disabled=!tx&&(rxBlocked||unavailable);button.innerHTML=tx?'<span class="bottom-ptt-main">● TRANSMITINDO</span><small>Solte para encerrar</small>':rxBlocked?'<span class="bottom-ptt-main">RX OCUPADO</span><small>Transmissão bloqueada</small>':unavailable?'<span class="bottom-ptt-main">PTT INDISPONÍVEL</span><small>Ligue ao master</small>':'<span class="bottom-ptt-main">🎙 PTT</span><small>Pressione e segure para transmitir</small>';button.hidden=prefs().hidePttButton&&!tx;}
   const txButton=$('#ptt');txButton.style.touchAction='none';
-  txButton.addEventListener('pointerdown',event=>{if(event.button!==0)return;event.preventDefault();if(prefs().pttMode==='hold'){txButton.setPointerCapture?.(event.pointerId);void requestPtt(true);}});
-  for(const eventName of ['pointerup','pointercancel','lostpointercapture'])txButton.addEventListener(eventName,()=>{if(prefs().pttMode==='hold')void requestPtt(false);});
-  txButton.onclick=event=>{event.preventDefault();if(prefs().pttMode==='toggle'||event.detail===0)void requestPtt(!active());};
+  txButton.addEventListener('pointerdown',event=>{if(event.button!==0)return;event.preventDefault();txButton.setPointerCapture?.(event.pointerId);void requestPtt(true);});
+  for(const eventName of ['pointerup','pointercancel','lostpointercapture'])txButton.addEventListener(eventName,()=>void requestPtt(false));
+  txButton.onclick=event=>event.preventDefault();
   txButton.oncontextmenu=event=>event.preventDefault();
   document.addEventListener('keydown',event=>{
     if(['INPUT','TEXTAREA','SELECT'].includes(event.target.tagName)||event.repeat)return;
     if((native()||desktopShortcutReady)&&prefs().hardwareKey==='F9'&&event.code==='F9')return; // native Activity owns hardware keys
     if(event.code===prefs().hardwareKey||(['Space','Enter'].includes(event.code)&&event.target===txButton)){
-      event.preventDefault();void requestPtt(prefs().pttMode==='toggle'?!active():true);
+      event.preventDefault();void requestPtt(true);
     }
     if(event.code==='Escape'){wantTransmit=false;void requestPtt(false);}
   });
-  document.addEventListener('keyup',event=>{if(prefs().pttMode==='hold'&&(event.code===prefs().hardwareKey||(['Space','Enter'].includes(event.code)&&event.target===txButton)))void requestPtt(false);});
+  document.addEventListener('keyup',event=>{if(event.code===prefs().hardwareKey||(['Space','Enter'].includes(event.code)&&event.target===txButton))void requestPtt(false);});
   $('#emergencyStop').onclick=async()=>{settings.operation={...prefs(),voxEnabled:false};$('#voxEnabled').checked=false;void stopDesktopVox();await requestPtt(false);await saveOptions();};
   window.addEventListener('blur',()=>{if(!native()||!prefs().allowLocked||prefs().pttMode==='hold')void requestPtt(false);if(!native())void stopDesktopVox();});
   window.addEventListener('beforeunload',()=>{if(!native()||!prefs().allowLocked)void requestPtt(false);});
@@ -197,10 +198,10 @@
     const value=prefs();for(const id of optionKeys){const input=$('#'+id);if(!input)continue;if(input.type==='checkbox')input.checked=Boolean(value[id]);else input.value=String(value[id]);}
     for(const [key,on]of Object.entries(value.columns)){const input=$('#column-'+key);if(input)input.checked=Boolean(on);}
     $('#voxState').textContent=value.voxEnabled?(native()?(gatewayStatus.connected?'VOX configurado no serviço Android.':'VOX configurado · aguarda ligação ao master.'):'VOX configurado · requer janela ativa.'):'VOX desligado.';
-    const hint=document.querySelector('.operation-hint');if(hint)hint.textContent=value.pttMode==='toggle'?'Toque para iniciar e toque novamente para parar. Trocar de TG não transmite voz. ODTP solicita inscrição no master.':'Mantenha premido para transmitir. Soltar libera o PTT.';
+    const hint=document.querySelector('.operation-hint');if(hint)hint.textContent='Mantenha premido para transmitir. Soltar libera o PTT.';
     $('#operationTheme').value=settings.theme;$('#audioMeters').hidden=!value.showMeters;
     $('#batterySettings').disabled=!native();$('#allowLocked').disabled=!native();
-    document.body.classList.toggle('hide-window-title',value.hideStatusBar&&!native());reflectTx();renderPreview();renderParticipantsView();
+    document.body.classList.toggle('hide-window-title',value.hideStatusBar&&!native());window.ZapDMRHome?.setParticipantView(value.participantView);window.ZapDMRHome?.setParticipantFontSize(value.participantFontSize);reflectTx();renderPreview();renderParticipantsView();
     if(applyRunning)return;applyRunning=true;
     try{
       if(native())await mobileAudio.configureOperation(value,settings.console||{},settings);
@@ -223,7 +224,7 @@
     }catch(error){settings.operation=old;await apply();toast(error.message);}
   };}
   for(const key of Object.keys(prefDefaults.columns))$('#column-'+key).onchange=async()=>{const value=prefs();value.columns[key]=$('#column-'+key).checked;if(!['time','callsign','name','location','talkgroup'].some(id=>value.columns[id])){value.columns.callsign=true;$('#column-callsign').checked=true;}settings.operation=value;try{await saveOptions();}catch(error){toast(error.message);}};
-  $('#operationTheme').onchange=async event=>{setTheme(event.target.value);$('#theme').value=event.target.value;await persist();};
+  $('#operationTheme').onchange=async event=>{setTheme(event.target.value);if($('#theme'))$('#theme').value=event.target.value;await persist();};
   $('#batterySettings').onclick=()=>void mobileAudio.batterySettings().catch(error=>toast(error.message));
   window.ZapDMROperation={apply,renderParticipants:renderParticipantsView,requestPtt,reflectTx};
   setInterval(()=>{
