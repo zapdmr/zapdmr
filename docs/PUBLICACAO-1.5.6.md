@@ -31,6 +31,7 @@ O GitHub informou estado `uploaded` e os mesmos digests. Todos os sete links res
 ## Verificações de atualização
 
 - Android publicado como `br.radio.zapdmr`, versionName 1.5.6, versionCode 28, assinatura v2/v3 e certificado igual ao da 1.5.5.
+- O instalador Windows informa FileVersion/ProductVersion 1.5.6. Ele não possui assinatura Authenticode (`NotSigned`), assim como o candidato 1.5.5; sua integridade é protegida pelos digests SHA-256 publicados, pelo manifesto Squirrel/SHA-1 e pela validação restrita às origens oficiais no atualizador.
 - O manifesto mantém a atualização opcional (`minSupportedCode: 0`) e não desativa versões anteriores.
 - Android oferece somente versionCode superior, valida tamanho, SHA-256, packageId e certificado e adia a atualização durante TX/RX.
 - Windows oferece somente versão semântica superior, valida SHA-256 e SHA-1/RELEASES e recusa reiniciar durante transmissão PTT.
