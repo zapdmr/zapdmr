@@ -11,6 +11,7 @@ import { loadWindowsSecret, saveWindowsSecret } from './secret-store';
 import { DEFAULT_HOTSPOT_FREQUENCY_HZ, DEFAULT_SETTINGS, type AppSettings, type ServerType, type Theme, type Talkgroup } from './types';
 import { startUdpTelemetry, type UdpTelemetry } from './udp-telemetry';
 import { AprsClient } from './aprs-client';
+import { aprsBaseCallsign, aprsPasscode, automaticAprsAuthorized, type AprsCredential } from './aprs-auth';
 import { SppSerial } from './spp-serial';
 
 interface StartOptions {
@@ -187,6 +188,7 @@ export async function startServer(options: StartOptions = {}) {
   const profilesFile = path.join(userDataDir, 'profiles.json');
   const profileSecretsDir = path.join(userDataDir, 'profile-secrets');
   const profileSecretFile = (profileId: string) => path.join(profileSecretsDir, `${profileId}.dpapi`);
+  const aprsSecretFile = (profileId: string) => path.join(profileSecretsDir, `${profileId}.aprs.dpapi`);
   const customTalkgroupsFile = path.join(userDataDir, 'custom-talkgroups.json');
   const dmrIdDatabaseFile = path.join(userDataDir, 'dmr-id-database.json');
   const audioSidecarExe = options.audioSidecarExe ?? process.env.ZAPDMR_AUDIO_SIDECAR_EXE;
@@ -197,6 +199,9 @@ export async function startServer(options: StartOptions = {}) {
   const profilePasswordsConfigured = new Set<string>();
   let hotspotPassword: string | undefined;
   let passwordStoreError = false;
+  let aprsCredential: AprsCredential | undefined;
+  let pendingAprsCredential: AprsCredential | undefined;
+  let aprsCredentialStoreError = false;
   let latestTelemetry: UdpTelemetry | null = null;
   let udpSocket: Awaited<ReturnType<typeof startUdpTelemetry>>['socket'] | undefined;
   let udpPort: number | null = null;
@@ -307,6 +312,18 @@ export async function startServer(options: StartOptions = {}) {
     passwordStoreError = true;
     console.warn('ZapDMR: não foi possível ler a senha protegida pelo Windows DPAPI:', (error as Error).message);
   }
+  const loadAprsCredential = async () => {
+    aprsCredential=undefined;pendingAprsCredential=undefined;aprsCredentialStoreError=false;
+    try {
+      const stored=await loadWindowsSecret(aprsSecretFile(activeProfileId));
+      if(!stored)return;
+      const value=JSON.parse(stored) as Partial<AprsCredential>;
+      const callsign=aprsBaseCallsign(value.callsign);
+      if(/^[A-Z0-9]{3,6}$/.test(callsign)&&/^\d{1,5}$/.test(String(value.passcode||''))&&(value.source==='automatic'||value.source==='manual'))
+        aprsCredential={callsign,passcode:String(value.passcode),source:value.source};
+    } catch(error) {aprsCredentialStoreError=true;console.warn('ZapDMR: credencial APRS protegida não pôde ser lida:',(error as Error).message);}
+  };
+  await loadAprsCredential();
   const persistProfiles = async () => {
     const temporaryFile = `${profilesFile}.tmp`;
     await fs.writeFile(temporaryFile, JSON.stringify({ activeProfileId, profiles }, null, 2), { encoding: 'utf8', mode: 0o600 });
@@ -406,7 +423,30 @@ export async function startServer(options: StartOptions = {}) {
     for (const client of mobileClients) if (client.readyState === WebSocket.OPEN) client.send(packet);
   };
   const log = (message:string,level='info') => {const entry={at:Date.now(),level,message:message.slice(0,300)};systemLog.push(entry);if(systemLog.length>500)systemLog.shift();broadcast('systemLog',entry);};
-  for(const event of ['status','message','station'])aprs.on(event,data=>broadcast('aprs',{event,data}));
+  const aprsSnapshot=()=>({...aprs.snapshot(),credentialConfigured:Boolean(aprsCredential),credentialSource:aprsCredential?.source||'',credentialStoreError:aprsCredentialStoreError});
+  const aprsPreferences=()=>{
+    const raw=(settings.console as any)?.aprs||{};
+    const base=aprsBaseCallsign(raw.callsign||settings.callsign),ssid=Math.max(0,Math.min(15,Number(raw.ssid)||0));
+    return {...raw,callsign:base+(ssid?'-'+ssid:''),host:String(raw.host||'rotate.aprs2.net'),port:Number(raw.port)||14580,beacon:raw.positionEnabled===true,smartBeacon:raw.smartBeaconing===true};
+  };
+  const connectAprs=async(rawConfig:Record<string,any>,manualPasscode='')=>{
+    const config={...aprsPreferences(),...rawConfig};
+    const base=aprsBaseCallsign(config.callsign),manual=String(manualPasscode||'').trim();
+    let credential:AprsCredential|undefined;
+    if(manual){if(!/^\d{1,5}$/.test(manual))throw new Error('O passcode APRS-IS manual deve conter de 1 a 5 algarismos.');credential={callsign:base,passcode:manual,source:'manual'};}
+    else if(aprsCredential?.callsign===base)credential=aprsCredential;
+    else if(automaticAprsAuthorized(settings,communityProfile,base))credential={callsign:base,passcode:String(aprsPasscode(base)),source:'automatic'};
+    pendingAprsCredential=credential&&(!aprsCredential||aprsCredential.callsign!==credential.callsign||aprsCredential.passcode!==credential.passcode||aprsCredential.source!==credential.source)?credential:undefined;
+    return aprs.connect(config,credential?.passcode||'-1');
+  };
+  aprs.on('status',data=>{
+    if((data as any)?.verified&&pendingAprsCredential){
+      const candidate=pendingAprsCredential;pendingAprsCredential=undefined;
+      void saveWindowsSecret(aprsSecretFile(activeProfileId),JSON.stringify(candidate)).then(()=>{aprsCredential=candidate;aprsCredentialStoreError=false;broadcast('aprs',{event:'status',data:aprsSnapshot()});}).catch(error=>{aprsCredentialStoreError=true;log('APRS: não foi possível guardar a credencial protegida.','error');console.warn(error);});
+    }
+    broadcast('aprs',{event:'status',data:{...data,credentialConfigured:Boolean(aprsCredential),credentialSource:aprsCredential?.source||'',credentialStoreError:aprsCredentialStoreError}});
+  });
+  for(const event of ['message','station'])aprs.on(event,data=>broadcast('aprs',{event,data}));
   let usageSaving=false;
   const usageTimer=setInterval(()=>{if(usageSaving)return;usageSaving=true;broadcast('usage',gateway.usageSnapshot());void fs.writeFile(path.join(userDataDir,'data-usage.json'),JSON.stringify(gateway.usageSnapshot()),{mode:0o600}).catch(()=>{}).finally(()=>{usageSaving=false;});},5000);usageTimer.unref();
   serialPtt.configure(settings.operation);
@@ -959,9 +999,9 @@ export async function startServer(options: StartOptions = {}) {
   app.get('/api/system-log',(_req,res)=>res.json({entries:systemLog}));
   app.delete('/api/system-log',(_req,res)=>{systemLog.length=0;res.json({ok:true});});
   app.post('/api/usage/reset',(_req,res)=>{gateway.resetUsage();res.json(gateway.usageSnapshot());});
-  app.get('/api/aprs',(_req,res)=>res.json(aprs.snapshot()));
-  app.post('/api/aprs/connect',async(req,res)=>{try{return res.json(await aprs.connect(req.body?.config||{},String(req.body?.passcode||'-1')));}catch(error){return res.status(400).json({message:(error as Error).message});}});
-  app.post('/api/aprs/disconnect',(_req,res)=>{aprs.disconnect();res.json(aprs.snapshot());});
+  app.get('/api/aprs',(_req,res)=>res.json(aprsSnapshot()));
+  app.post('/api/aprs/connect',async(req,res)=>{try{await connectAprs(req.body?.config||{},String(req.body?.manualPasscode||''));return res.json(aprsSnapshot());}catch(error){return res.status(400).json({message:(error as Error).message});}});
+  app.post('/api/aprs/disconnect',(_req,res)=>{pendingAprsCredential=undefined;aprs.disconnect();res.json(aprsSnapshot());});
   app.post('/api/aprs/message',(req,res)=>{try{return res.json(aprs.sendMessage(String(req.body?.to||''),String(req.body?.text||'')));}catch(error){return res.status(409).json({message:(error as Error).message});}});
   app.post('/api/aprs/position',(req,res)=>{try{aprs.position(Number(req.body?.latitude),Number(req.body?.longitude));return res.json(aprs.snapshot());}catch(error){return res.status(400).json({message:(error as Error).message});}});
   app.post('/api/aprs/beacon',(_req,res)=>{try{aprs.beacon();return res.json(aprs.snapshot());}catch(error){return res.status(409).json({message:(error as Error).message});}});
@@ -1044,6 +1084,7 @@ export async function startServer(options: StartOptions = {}) {
           (profile.id === 'default' ? await loadWindowsSecret(passwordFile) : undefined);
         if (hotspotPassword) profilePasswordsConfigured.add(profile.id);
       } catch (error) { hotspotPassword = undefined; passwordStoreError = true; console.warn('ZapDMR: senha do perfil não foi lida:', (error as Error).message); }
+      aprs.disconnect();await loadAprsCredential();
       await fs.writeFile(settingsFile, JSON.stringify(settings, null, 2), { encoding: 'utf8', mode: 0o600 });
       await persistProfiles();
       broadcast('settings', { ...settings, profileId: activeProfileId, profileName: profile.name, passwordConfigured: Boolean(hotspotPassword), passwordStoreError });
@@ -1064,11 +1105,13 @@ export async function startServer(options: StartOptions = {}) {
       }
       const [removed] = profiles.splice(index, 1);
       await fs.rm(profileSecretFile(removed.id), { force: true });
+      await fs.rm(aprsSecretFile(removed.id), { force: true });
       profilePasswordsConfigured.delete(removed.id);
       if (deletingActive) {
         const next = profiles[0]; activeProfileId = next.id; settings = { ...next.settings };applyProfileRuntime();
         try { hotspotPassword = await loadWindowsSecret(profileSecretFile(next.id)) ?? (next.id === 'default' ? await loadWindowsSecret(passwordFile) : undefined); }
         catch { hotspotPassword = undefined; passwordStoreError = true; }
+        aprs.disconnect();await loadAprsCredential();
         await fs.writeFile(settingsFile, JSON.stringify(settings, null, 2), { encoding: 'utf8', mode: 0o600 });
         broadcast('settings', { ...settings, profileId: activeProfileId, profileName: next.name, passwordConfigured: Boolean(hotspotPassword), passwordStoreError });
         broadcast('status', status());
@@ -1156,11 +1199,12 @@ export async function startServer(options: StartOptions = {}) {
       const profilesWithSecrets = await Promise.all(profiles.map(async (profile) => ({
         ...profile,
         protectedPassword: await fs.readFile(profileSecretFile(profile.id), 'utf8').then((value) => value.trim()).catch(async () =>
-          profile.id === 'default' ? await fs.readFile(passwordFile, 'utf8').then((value) => value.trim()).catch(() => undefined) : undefined)
+          profile.id === 'default' ? await fs.readFile(passwordFile, 'utf8').then((value) => value.trim()).catch(() => undefined) : undefined),
+        protectedAprsCredential: await fs.readFile(aprsSecretFile(profile.id), 'utf8').then((value) => value.trim()).catch(() => undefined)
       })));
       res.setHeader('Content-Disposition', `attachment; filename="ZapDMR-backup-${new Date().toISOString().slice(0, 10)}.json"`);
       return res.json({
-        format: 'ZapDMR-backup', version: 2, createdAt: new Date().toISOString(),
+        format: 'ZapDMR-backup', version: 3, createdAt: new Date().toISOString(),
         settings, customTalkgroups, dmrIdDatabase: { updatedAt: dmrIdDatabaseUpdatedAt, records: dmrIdRecords },
         activeProfileId, profiles: profilesWithSecrets
       });
@@ -1169,7 +1213,7 @@ export async function startServer(options: StartOptions = {}) {
   app.post('/api/backup', async (req, res, next) => {
     try {
       const backup = req.body as { format?: unknown; version?: unknown; settings?: Partial<AppSettings>; customTalkgroups?: unknown; dmrIdDatabase?: unknown; protectedPassword?: unknown; activeProfileId?: unknown; profiles?: unknown };
-      if (backup?.format !== 'ZapDMR-backup' || ![1, 2].includes(Number(backup.version)) || !backup.settings || !Array.isArray(backup.customTalkgroups))
+      if (backup?.format !== 'ZapDMR-backup' || ![1, 2, 3].includes(Number(backup.version)) || !backup.settings || !Array.isArray(backup.customTalkgroups))
         return res.status(400).json({ error: 'O arquivo não é um backup ZapDMR válido.' });
       if (gateway.status().pttArmed)
         return res.status(409).json({ error: 'Desarme o PTT antes de restaurar um backup.' });
@@ -1193,12 +1237,16 @@ export async function startServer(options: StartOptions = {}) {
       const restoredActiveProfileId = restoredProfiles.some((profile) => profile.id === backup.activeProfileId)
         ? String(backup.activeProfileId) : restoredProfiles[0].id;
       const profileSecretMap = new Map<string, string>();
+      const aprsSecretMap = new Map<string, string>();
       if (Array.isArray(backup.profiles)) for (const raw of backup.profiles) {
         if (!raw || typeof raw !== 'object') continue;
-        const item = raw as { id?: unknown; protectedPassword?: unknown };
+        const item = raw as { id?: unknown; protectedPassword?: unknown; protectedAprsCredential?: unknown };
         if (typeof item.id === 'string' && /^[a-zA-Z0-9_-]{1,64}$/.test(item.id) &&
             typeof item.protectedPassword === 'string' && /^dpapi-(?:user|machine):[A-Za-z0-9+/=]+$/.test(item.protectedPassword))
           profileSecretMap.set(item.id, item.protectedPassword);
+        if (typeof item.id === 'string' && /^[a-zA-Z0-9_-]{1,64}$/.test(item.id) &&
+            typeof item.protectedAprsCredential === 'string' && /^dpapi-(?:user|machine):[A-Za-z0-9+/=]+$/.test(item.protectedAprsCredential))
+          aprsSecretMap.set(item.id, item.protectedAprsCredential);
       }
       const legacyProtectedPassword = typeof backup.protectedPassword === 'string' && /^dpapi-(?:user|machine):[A-Za-z0-9+/=]+$/.test(backup.protectedPassword)
         ? backup.protectedPassword : undefined;
@@ -1212,6 +1260,7 @@ export async function startServer(options: StartOptions = {}) {
       for (const entry of await fs.readdir(profileSecretsDir).catch(() => []))
         if (entry.endsWith('.dpapi')) await fs.rm(path.join(profileSecretsDir, entry), { force: true });
       for (const [id, encrypted] of profileSecretMap) await fs.writeFile(profileSecretFile(id), `${encrypted}\n`, { encoding: 'utf8', mode: 0o600 });
+      for (const [id, encrypted] of aprsSecretMap) await fs.writeFile(aprsSecretFile(id), `${encrypted}\n`, { encoding: 'utf8', mode: 0o600 });
       if (legacyProtectedPassword && !profileSecretMap.has('default')) await fs.writeFile(passwordFile, `${legacyProtectedPassword}\n`, { encoding: 'utf8', mode: 0o600 });
       else if (!profileSecretMap.has('default')) await fs.rm(passwordFile, { force: true });
       profiles = restoredProfiles;
@@ -1226,6 +1275,7 @@ export async function startServer(options: StartOptions = {}) {
       for (const id of profileSecretMap.keys()) profilePasswordsConfigured.add(id);
       try { hotspotPassword = await loadWindowsSecret(profileSecretFile(activeProfileId)) ?? (activeProfileId === 'default' ? await loadWindowsSecret(passwordFile) : undefined); passwordStoreError = false; }
       catch { hotspotPassword = undefined; passwordStoreError = true; }
+      aprs.disconnect();await loadAprsCredential();
       await persistProfiles();
       broadcast('settings', { ...settings, profileId: activeProfileId, profileName: restoredActiveProfile.name, passwordConfigured: Boolean(hotspotPassword), passwordStoreError });
       broadcast('status', status());

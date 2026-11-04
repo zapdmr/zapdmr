@@ -414,13 +414,15 @@ public final class MobileAudioPlugin extends Plugin {
 
     private static final java.util.concurrent.atomic.AtomicBoolean profileChanging=new java.util.concurrent.atomic.AtomicBoolean();
 
-    private JSONObject readConfig() throws Exception {
+    static JSONObject readProtectedConfig(Context context) throws Exception {
 
-        String encrypted=getContext().getSharedPreferences(PREFS,Context.MODE_PRIVATE).getString(CONFIG_KEY,null);
+        String encrypted=context.getSharedPreferences(PREFS,Context.MODE_PRIVATE).getString(CONFIG_KEY,null);
 
         return encrypted==null?new JSONObject():new JSONObject(decrypt(encrypted));
 
     }
+
+    private JSONObject readConfig() throws Exception {return readProtectedConfig(getContext());}
 
     private void writeConfig(JSONObject value) throws Exception {
 
@@ -888,7 +890,7 @@ public final class MobileAudioPlugin extends Plugin {
 
 
 
-    private SecretKey getOrCreateKey() throws Exception {
+    private static SecretKey getOrCreateKey() throws Exception {
 
         KeyStore store=KeyStore.getInstance("AndroidKeyStore");store.load(null);java.security.Key existing=store.getKey(KEY_ALIAS,null);
 
@@ -904,7 +906,7 @@ public final class MobileAudioPlugin extends Plugin {
 
     }
 
-    private String encrypt(String text) throws Exception {
+    private static String encrypt(String text) throws Exception {
 
         Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.ENCRYPT_MODE,getOrCreateKey());
 
@@ -914,7 +916,7 @@ public final class MobileAudioPlugin extends Plugin {
 
     }
 
-    private String decrypt(String value) throws Exception {
+    private static String decrypt(String value) throws Exception {
 
         String[] parts=value.split(":",2);if(parts.length!=2)throw new IllegalArgumentException("Perfil cifrado inválido.");
 

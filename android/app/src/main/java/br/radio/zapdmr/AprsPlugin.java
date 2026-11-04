@@ -45,11 +45,11 @@ public final class AprsPlugin extends Plugin {
         receiver=new BroadcastReceiver(){@Override public void onReceive(Context context,Intent intent){try{JSObject data=JSObject.fromJSONObject(new JSONObject(intent.getStringExtra("data")));notifyListeners("aprsEvent",new JSObject().put("event",intent.getStringExtra("event")).put("data",data),false);}catch(Exception ignored){}}};
         if(Build.VERSION.SDK_INT>=33)getContext().registerReceiver(receiver,new IntentFilter(AprsService.EVENT),Context.RECEIVER_NOT_EXPORTED);else getContext().registerReceiver(receiver,new IntentFilter(AprsService.EVENT));
     }
-    @PluginMethod public void initialize(PluginCall call){worker.execute(()->{try{call.resolve(JSObject.fromJSONObject(AprsService.snapshot(getContext())));}catch(Exception error){call.reject("Não foi possível ler o estado APRS.","APRS_STATUS_FAILED",error);}});}
+    @PluginMethod public void initialize(PluginCall call){worker.execute(()->{try{JSONObject value=AprsService.snapshot(getContext()),status=AprsCredentialStore.status(getContext());value.put("credentialConfigured",status.optBoolean("credentialConfigured")).put("credentialSource",status.optString("credentialSource"));call.resolve(JSObject.fromJSONObject(value));}catch(Exception error){call.reject("Não foi possível ler o estado APRS.","APRS_STATUS_FAILED",error);}});}
     @PluginMethod public void connect(PluginCall call){
         try{
-            JSONObject config=AprsService.cleanConfig(call.getObject("config",new JSObject()));String passcode=call.getString("passcode","");AprsService.validatePasscode(passcode);
-            Intent intent=new Intent(getContext(),AprsService.class).setAction(AprsService.CONNECT).putExtra("config",config.toString()).putExtra("passcode",passcode);
+            JSONObject config=AprsService.cleanConfig(call.getObject("config",new JSObject()));AprsCredentialStore.Resolved credential=AprsCredentialStore.resolve(getContext(),config.getString("callsign"),call.getString("manualPasscode",""));AprsService.validatePasscode(credential.passcode);
+            Intent intent=new Intent(getContext(),AprsService.class).setAction(AprsService.CONNECT).putExtra("config",config.toString()).putExtra("passcode",credential.passcode).putExtra("credential",credential.passcode.equals("-1")?"":credential.json().toString());
             // This method is invoked from a visible screen; Android permits foreground GPS promotion here.
             getActivity().runOnUiThread(()->{try{ContextCompat.startForegroundService(getContext(),intent);call.resolve(new JSObject().put("accepted",true).put("state","connecting"));}catch(Exception error){call.reject("Não foi possível iniciar a sessão APRS-IS.","APRS_START_FAILED",error);}});
         }catch(Exception error){call.reject(error.getMessage()==null?"Configuração APRS inválida.":error.getMessage(),"APRS_CONFIG_INVALID",error);}

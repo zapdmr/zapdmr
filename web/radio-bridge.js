@@ -3,7 +3,7 @@
   const ui=window.ZapDMRConsole;if(!ui)return;
   const native=()=>Boolean(mobileAudio?.isAndroid?.());
   let aprsPlugin;try{aprsPlugin=window.Capacitor?.Plugins?.Aprs||window.Capacitor?.registerPlugin?.('Aprs');}catch{}
-  let lastStatus={},lastConnection,rxActive=false,lastIncoming=0,contactsSignature='',lastPosition=null,targetPendingUntil=0;
+  let lastStatus={},lastConnection,rxActive=false,lastIncoming=0,contactsSignature='',lastPosition=null,targetPendingUntil=0,aprsRestoreSignature='',aprsRestoreFlight=Promise.resolve();
   const checked=async(url,options={})=>{const result=await callApi(url,options);if(!result.ok)throw new Error(result.data?.message||result.data?.error||'O serviço local não respondeu.');return result.data;};
   const post=(url,data={})=>checked(url,{method:'POST',body:JSON.stringify(data),signal:AbortSignal.timeout(25000)});
   window.ZapDMRDesktop?.onScan(()=>$('#scanTalkgroups').click());
@@ -58,13 +58,14 @@
   }
   async function lookupContact(query){const data=native()?await mobileAudio.dmrDatabase('lookup',[String(query)]):await post('/api/dmr-id-database/lookup',{ids:[String(query)]});return data.records?.find(r=>String(r.id)===String(query)||String(r.callsign).toUpperCase()===String(query).toUpperCase())||null;}
   window.ZapDMRRadioBridge={reflectTarget,selectContact:target,lookupContact};
-  ui.init({platform:native()?'android':'windows',getSettings:()=>settings,getStatus:()=>lastStatus,toast,openSettings:id=>{setActiveScreen('settings');setActiveSettingsPane(id);},toggleScan:()=>$('#scanTalkgroups').click(),
+  const uiHooks={platform:native()?'android':'windows',getSettings:()=>settings,getStatus:()=>lastStatus,toast,openSettings:id=>{setActiveScreen('settings');setActiveSettingsPane(id);},toggleScan:()=>$('#scanTalkgroups').click(),
     persist:savePatch,
     lookup:async query=>{if(native())return mobileAudio.dmrDatabase('lookup',[String(query)]);return post('/api/dmr-id-database/lookup',{ids:[String(query)]});},
     selectContact:target,
     requestPosition:locate,
-    connectAprs:async raw=>{const {passcode,...prefs}=raw;const base=String(prefs.callsign||settings.callsign||'').toUpperCase().replace(/-\d{1,2}$/,'');const config={...prefs,callsign:base+(Number(prefs.ssid)?'-'+Number(prefs.ssid):''),beacon:prefs.positionEnabled===true,smartBeacon:prefs.smartBeaconing===true,symbol:prefs.symbol,...(lastPosition||{})};const result=native()?await aprsPlugin.connect({config,passcode:passcode||'-1'}):await post('/api/aprs/connect',{config,passcode:passcode||'-1'});aprsEvent({event:'status',data:result});return result;},
+    connectAprs:async raw=>{const {manualPasscode,...prefs}=raw;const base=String(prefs.callsign||settings.callsign||'').toUpperCase().replace(/-\d{1,2}$/,'');const config={...prefs,callsign:base+(Number(prefs.ssid)?'-'+Number(prefs.ssid):''),beacon:prefs.positionEnabled===true,smartBeacon:prefs.smartBeaconing===true,symbol:prefs.symbol,...(lastPosition||{})};const result=native()?await aprsPlugin.connect({config,manualPasscode:manualPasscode||''}):await post('/api/aprs/connect',{config,manualPasscode:manualPasscode||''});aprsEvent({event:'status',data:result});return result;},
     disconnectAprs:async()=>{const result=native()?await aprsPlugin.disconnect():await post('/api/aprs/disconnect');aprsEvent({event:'status',data:{state:'disconnected',verified:false}});return result;},
+    restoreAprs:config=>{const base=String(config?.callsign||settings.callsign||'').toUpperCase().replace(/-\d{1,2}$/,'');const signature=JSON.stringify({profile:typeof activeProfileId==='string'?activeProfileId:'',enabled:config?.enabled===true,callsign:base,ssid:Number(config?.ssid)||0,host:config?.host||'rotate.aprs2.net',port:Number(config?.port)||14580,messages:config?.messages!==false,map:config?.map!==false,positionEnabled:config?.positionEnabled===true,smartBeaconing:config?.smartBeaconing===true,intervalMinutes:Number(config?.intervalMinutes)||5,symbol:config?.symbol||'['});if(signature===aprsRestoreSignature)return;aprsRestoreSignature=signature;aprsRestoreFlight=aprsRestoreFlight.catch(()=>{}).then(async()=>{try{if(config?.enabled===true)await uiHooks.connectAprs({...config,...(lastPosition||{})});else await uiHooks.disconnectAprs();}catch(error){ui.log({source:'APRS',level:'error',message:error.message});}});},
     sendMessage:async data=>{const result=native()?await aprsPlugin.sendMessage(data):await post('/api/aprs/message',data);aprsEvent({event:'message',data:result});return result;},
     sendPosition:async position=>{if(position){lastPosition=position;if(native())await aprsPlugin.position(position);else await post('/api/aprs/position',position);}return native()?aprsPlugin.beacon():post('/api/aprs/beacon');},
     listSpp:async()=>{if(native()){await mobileAudio.requestOperationPermission('bluetooth');return mobileAudio.bluetoothSpp({action:'devices'});}return checked('/api/spp');},
@@ -77,7 +78,7 @@
     incomingMessage:row=>{if(Date.now()-Number(row.at)<5000)notify('ZapDMR · '+row.from,row.text);},
     clearLog:async()=>native()?mobileAudio.radioControl({action:'logClear'}):checked('/api/system-log',{method:'DELETE'}),
     contactsChanged:async contacts=>{const signature=JSON.stringify(contacts);if(signature===contactsSignature)return;contactsSignature=signature;settings.console={...settings.console,contacts};try{await persist();}catch(error){ui.log({level:'error',message:error.message});}}
-  });
+  };ui.init(uiHooks);
   window.addEventListener('zapdmr:radio-event',async({detail:packet})=>{
     const data=packet?.data||{},event=packet?.event;
     if(event==='incomingPrivateCall')void incomingPrivate(data);
