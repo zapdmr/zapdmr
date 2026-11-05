@@ -6,11 +6,11 @@
   const clean=value=>String(value??'').trim();
   const valid=value=>value&&!/^(?:null|undefined|unknown|n\/a|—)$/i.test(value);
   const text=value=>valid(clean(value))?clean(value):'Não informado';
-  const flag=item=>{
+  const countryCode=item=>{
     const raw=clean(item.countryCode||item.country).toUpperCase();
-    const code=/^[A-Z]{2}$/.test(raw)?raw:/^(BRASIL|BRAZIL)$/.test(raw)?'BR':'';
-    return code?[...code].map(char=>String.fromCodePoint(127397+char.charCodeAt(0))).join(''):'';
+    return /^[A-Z]{2}$/.test(raw)?raw:/^(BRASIL|BRAZIL)$/.test(raw)?'BR':'';
   };
+  const flag=item=>{const code=countryCode(item);return code?[...code].map(char=>String.fromCodePoint(127397+char.charCodeAt(0))).join(''):'';};
   const time=value=>{const date=new Date(Number(value));return Number.isFinite(date.getTime())?date.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'—';};
   const identity=item=>clean(item.sourceId||item.id||item.callsign).toUpperCase();
   const location=item=>[clean(item.location||item.city),clean(item.state),clean(item.country)].filter(valid).filter((value,index,list)=>list.indexOf(value)===index).join(', ')||'Não informado';
@@ -34,11 +34,14 @@
       const button=document.createElement('button');button.type='button';button.className='participant-card';button.setAttribute('role','listitem');button.dataset.dmrId=clean(item.sourceId||item.id);button.dataset.callsign=clean(item.callsign).toUpperCase();
       if(active(item,index))button.classList.add('active-rx');
       const rank=document.createElement('span');rank.className='participant-rank';rank.textContent=String(index+1);
-      const state=document.createElement('span');state.className='participant-state';state.textContent=active(item,index)?'◉':'●';state.setAttribute('aria-label',active(item,index)?'Operador em recepção':'Participante da rodada');
+      const isRecent=active(item,index)||Date.now()-Number(item.at)<60000;
+      const state=document.createElement('span');state.className=`participant-state ${isRecent?'online':'offline'}`;state.textContent=active(item,index)?'◉':'●';state.setAttribute('aria-label',active(item,index)?'Operador em recepção':isRecent?'Atividade recente':'Sem atividade recente');
       const info=document.createElement('span');info.className='participant-card-info';
       const call=document.createElement('strong');call.textContent=text(item.callsign);
       const name=document.createElement('span');name.textContent=text(item.name);
-      const place=document.createElement('small');place.textContent=[flag(item),location(item)].filter(Boolean).join(' ');
+      const place=document.createElement('small'),code=countryCode(item),emoji=document.createElement('span');emoji.className='participant-country-emoji';emoji.textContent=flag(item);place.append(emoji);
+      if(code){const image=document.createElement('img');image.className='participant-country-flag';image.src=`/flags/${code.toLowerCase()}.svg`;image.alt='';image.onerror=()=>image.remove();place.append(image);}
+      place.append(document.createTextNode(location(item)));
       info.append(call,name,place);
       const stamp=document.createElement('time');stamp.dateTime=new Date(Number(item.at)||Date.now()).toISOString();stamp.textContent=time(item.at);
       const arrow=document.createElement('span');arrow.className='participant-arrow';arrow.textContent='›';arrow.setAttribute('aria-hidden','true');

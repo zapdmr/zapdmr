@@ -19,7 +19,7 @@ assert.match(consoleJs,/rc-top-contact[\s\S]*<svg/);assert.doesNotMatch(consoleJ
 assert.match(chat,/Abrir ZapChat ·/);assert.match(actions,/Informações da rodada/);assert.match(actions,/Chamada privada/);assert.match(actions,/QRZ\.com/);assert.match(actions,/ZapChat/);
 assert.match(operation,/gatewayStatus\.rxBusy/);assert.match(operation,/RX OCUPADO/);
 assert.match(operation,/pttMode:'hold'/);assert.doesNotMatch(operation,/value="toggle"/);assert.match(operation,/pointerdown/);assert.match(operation,/pointerup/);
-assert.equal(pkg.version,'2.0.1');assert.equal(pkg.productName,'ZapDMR Home Preview');assert.match(gradle,/applicationIdSuffix "\.homepreview"/);assert.match(gradle,/versionCode 20002/);assert.match(gradle,/2\.0\.0-test\.2/);assert.match(forge,/zapdmrhomepreview/);
+assert.equal(pkg.version,'2.0.1');assert.equal(pkg.productName,'ZapDMR Home Preview');assert.match(gradle,/applicationIdSuffix "\.homepreview"/);assert.match(gradle,/versionCode 20003/);assert.match(gradle,/2\.0\.0-test\.3/);assert.match(forge,/zapdmrhomepreview/);
 const changed=cp.execFileSync('git',['diff','--name-only','checkpoint/home-zapchat-before-2.0'],{cwd:root,encoding:'utf8'}).trim().split(/\r?\n/).filter(Boolean);
 for(const protectedPath of ['site/public/updates/stable.json','android/app/src/main/java/br/radio/zapdmr/AprsService.java','web/app-updater.js','electron/windows-updater.cjs'])assert(!changed.includes(protectedPath),protectedPath+' must remain untouched');
 console.log('PASS Home/ZapChat 2.0 contract: Appearance-controlled Last Heard views, no 30/50 visual cap, details, ZapChat badge, momentary RX/PTT contract, three-item navigation, isolated packages and stable/APRS files untouched.');

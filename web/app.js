@@ -1059,6 +1059,10 @@ $('#expandCatalog').onclick = () => {
   $('#expandCatalog').textContent = expanded ? '↙' : '⛶';
 };
 if($('#theme'))$('#theme').onchange = async (event) => { setTheme(event.target.value); await persist(); };
+if($('#badge')&&$('#mobileConnectionState')){
+  const syncMobileConnectionState=()=>{const connected=$('#badge').classList.contains('online'),reconnecting=$('#badge').classList.contains('reconnecting'),control=$('#mobileConnectionState');control.classList.toggle('online',connected);control.classList.toggle('reconnecting',reconnecting);control.setAttribute('aria-label',reconnecting?'A reconectar':connected?'Conectado':'Desconectado');control.title=control.getAttribute('aria-label');};
+  new MutationObserver(syncMobileConnectionState).observe($('#badge'),{attributes:true,childList:true,subtree:true});syncMobileConnectionState();
+}
 if($('#favoriteSelected'))$('#favoriteSelected').onclick = () => { const group = groupSelected(); if (group) toggleFavorite(group.id); };
 document.querySelectorAll('.bottom-nav-button[data-screen]').forEach((button) => {
   button.onclick = () => setActiveScreen(button.dataset.screen);
