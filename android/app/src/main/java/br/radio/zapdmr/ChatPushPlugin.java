@@ -1,15 +1,21 @@
 package br.radio.zapdmr;
 
 import android.Manifest;
+import android.app.Activity;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.net.Uri;
+import android.provider.MediaStore;
+import android.util.Base64;
 import android.os.Build;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.content.FileProvider;
+import androidx.activity.result.ActivityResult;
 import android.content.pm.PackageManager;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -17,15 +23,20 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.PermissionState;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
 import com.google.firebase.FirebaseApp;
 import com.google.firebase.messaging.FirebaseMessaging;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
 
 /** Chat notifications never start the radio service, request audio focus or synthesize PTT. */
-@CapacitorPlugin(name="ZapChatPush",permissions={@Permission(alias="notifications",strings={Manifest.permission.POST_NOTIFICATIONS})})
+@CapacitorPlugin(name="ZapChatPush",permissions={@Permission(alias="notifications",strings={Manifest.permission.POST_NOTIFICATIONS}),@Permission(alias="camera",strings={Manifest.permission.CAMERA})})
 public final class ChatPushPlugin extends Plugin {
     private static long lastToneAt=0;
+    private File pendingProfilePhoto;
     static final String CHANNEL=BuildConfig.ZAPCHAT_TEST_BUILD?"zapchat_test_messages":"zapchat_messages";
     private static String appLabel(){return BuildConfig.ZAPCHAT_TEST_BUILD?"ZapChat Teste":"ZapChat";}
     static void channel(Context context){if(Build.VERSION.SDK_INT>=26){NotificationChannel channel=new NotificationChannel(CHANNEL,BuildConfig.ZAPCHAT_TEST_BUILD?"Mensagens ZapChat Teste":"Mensagens ZapChat",NotificationManager.IMPORTANCE_LOW);channel.setSound(null,null);channel.enableVibration(false);context.getSystemService(NotificationManager.class).createNotificationChannel(channel);}}
@@ -44,6 +55,29 @@ public final class ChatPushPlugin extends Plugin {
     @PluginMethod public void disable(PluginCall call){getContext().getSharedPreferences("zapdmr_chat_push",Context.MODE_PRIVATE).edit().putBoolean("enabled",false).apply();if(!FirebaseApp.getApps(getContext()).isEmpty()){FirebaseMessaging.getInstance().setAutoInitEnabled(false);FirebaseMessaging.getInstance().deleteToken();}call.resolve();}
     @PluginMethod public void requestLocalPermission(PluginCall call){if(Build.VERSION.SDK_INT>=33&&getPermissionState("notifications")!=PermissionState.GRANTED){requestPermissionForAlias("notifications",call,"localPermissionResult");return;}call.resolve();}
     @PermissionCallback private void localPermissionResult(PluginCall call){if(getPermissionState("notifications")==PermissionState.GRANTED)call.resolve();else call.reject("Notificações desativadas. O contador de mensagens continua disponível.");}
+    @PluginMethod public synchronized void captureProfilePhoto(PluginCall call){
+        if(pendingProfilePhoto!=null){call.reject("A câmera já está aberta.");return;}
+        if(getPermissionState("camera")!=PermissionState.GRANTED){requestPermissionForAlias("camera",call,"cameraPermissionResult");return;}
+        openProfileCamera(call);
+    }
+    @PermissionCallback private void cameraPermissionResult(PluginCall call){if(getPermissionState("camera")==PermissionState.GRANTED)openProfileCamera(call);else call.reject("Permita a câmera para tirar a foto do perfil.","CAMERA_PERMISSION_DENIED");}
+    private synchronized void openProfileCamera(PluginCall call){
+        try{
+            File target=File.createTempFile("zapchat-profile-",".jpg",getContext().getCacheDir());
+            Uri uri=FileProvider.getUriForFile(getContext(),getContext().getPackageName()+".fileprovider",target);
+            Intent intent=new Intent(MediaStore.ACTION_IMAGE_CAPTURE).putExtra(MediaStore.EXTRA_OUTPUT,uri).addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION|Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            if(intent.resolveActivity(getContext().getPackageManager())==null){target.delete();call.reject("Nenhum aplicativo de câmera está disponível.");return;}
+            pendingProfilePhoto=target;startActivityForResult(call,intent,"profileCameraResult");
+        }catch(Exception error){pendingProfilePhoto=null;call.reject("Não foi possível abrir a câmera.");}
+    }
+    @ActivityCallback private synchronized void profileCameraResult(PluginCall call,ActivityResult result){
+        File file=pendingProfilePhoto;pendingProfilePhoto=null;if(call==null)return;
+        if(result.getResultCode()!=Activity.RESULT_OK||file==null||!file.isFile()){if(file!=null)file.delete();call.resolve(new JSObject().put("canceled",true));return;}
+        getBridge().execute(()->{try(FileInputStream input=new FileInputStream(file);ByteArrayOutputStream output=new ByteArrayOutputStream()){
+            byte[] chunk=new byte[65536];int read,total=0;while((read=input.read(chunk))!=-1){total+=read;if(total>12*1024*1024)throw new java.io.IOException("Foto grande demais");output.write(chunk,0,read);}byte[] bytes=output.toByteArray();if(bytes.length<4||bytes[0]!=(byte)0xff||bytes[1]!=(byte)0xd8||bytes[2]!=(byte)0xff)throw new java.io.IOException("Foto inválida");
+            call.resolve(new JSObject().put("canceled",false).put("mime","image/jpeg").put("name","camera.jpg").put("base64",Base64.encodeToString(bytes,Base64.NO_WRAP)));
+        }catch(Exception error){call.reject("A câmera não devolveu uma foto válida.");}finally{file.delete();}});
+    }
     @PluginMethod public void localNotice(PluginCall call){
         String peer=call.getString("peerId",""),id=call.getString("messageId",""),account=call.getString("accountId",""),name=call.getString("callsign","");
         if(!validPeer(peer)||!validPeer(account)||!id.matches("(?i)[a-f0-9-]{32,64}")||!name.matches("[A-Z0-9/]{3,20}")){call.reject("Aviso inválido.");return;}
