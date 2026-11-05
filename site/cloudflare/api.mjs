@@ -141,7 +141,7 @@ async function challengeView(config,env,codeRow,plain){
     const status=job?.status||'queued';
     result.deliveryStatus=status;result.sent=['sent','delivered'].includes(status);result.delivered=status==='delivered';result.queued=['queued','sending'].includes(status);
     if(result.delivered)result.message='O WhatsApp confirmou o recebimento do código. Digite os seis dígitos recebidos na mensagem.';
-    else if(status==='sent')result.message='Código encaminhado ao WhatsApp; a entrega no telefone ainda não foi confirmada. Se não chegar, use Reenviar código após o contador.';
+    else if(status==='sent')result.message='Código encaminhado ao WhatsApp; a entrega no telefone ainda não foi confirmada. Se não chegar em até 90 segundos, ofereceremos a confirmação segura pelo seu próprio WhatsApp.';
     else if(status==='failed'||status==='sending'&&job.attempts>=2&&job.lease_until<now){
       const official=await isOfficialPhoneHash(config,env,job?.phone_hash);
       result.message=official?'Não foi possível confirmar a entrega ao WhatsApp do número oficial. Use Reenviar código após o contador e confira as mensagens no aparelho principal. A confirmação reversa para o próprio número não está disponível.':'Não foi possível confirmar o envio do código. Use Reenviar código após o contador.';
@@ -256,7 +256,9 @@ async function api(request,env,url,config){
     if(!row||row.expires_at<=Date.now()||row.attempts>=5)return json(200,{status:'expired',expiresInSeconds:0,retryAfterSeconds:0});
     if(row.mode==='bridge'&&Date.now()>row.requested_at+90000&&reverseConfigured(env)&&!await isOfficialPhoneHash(config,env,row.phone_hash)){
       const job=await db.prepare('SELECT status,attempts,lease_until FROM whatsapp_outbox WHERE registration_id=? AND code_hash=?').bind(row.registration_id,row.hash).first();
-      if(!['sent','delivered'].includes(job?.status)&&(!await bridgeConnected(config,env)||job?.attempts>=2&&job.lease_until<Date.now())){await db.prepare("UPDATE codes SET mode='reverse' WHERE registration_id=? AND hash=? AND mode='bridge'").bind(row.registration_id,row.hash).run();row.mode='reverse';}
+      // "sent" only means that the bridge submitted the message. Without a
+      // delivery receipt, offer the authenticated reverse path after 90 s.
+      if(job?.status!=='delivered'){await db.prepare("UPDATE codes SET mode='reverse' WHERE registration_id=? AND hash=? AND mode='bridge'").bind(row.registration_id,row.hash).run();row.mode='reverse';}
     }
     const plain=JSON.parse(await unseal(config,row.challenge_cipher)),challenge=await challengeView(config,env,row,plain);
     return json(200,{status:row.mode==='reverse'&&row.reverse_confirmed_at?'confirmed':'pending',expiresInSeconds:challenge.expiresInSeconds,retryAfterSeconds:challenge.retryAfterSeconds,challenge});
