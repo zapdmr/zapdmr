@@ -6,7 +6,7 @@
     function assign(value){const c=getConfig();for(const key of fields)if(value[key]!==undefined)c[key]=value[key];if(value.user)c.account=value.user;}
     async function request(route,body,method,signal){
       const timeout=AbortSignal.timeout(15000),combined=signal?AbortSignal.any([signal,timeout]):timeout,c=getConfig();
-      const response=await fetcher(endpoint()+route,{method:method||(body?'POST':'GET'),headers:{'Content-Type':'application/json',...(window.ZapDMRUpdater?.headers?.()||{}),...(c.token?{Authorization:'Bearer '+c.token}:{})},...(body?{body:JSON.stringify(body)}:{}),signal:combined});
+      const response=await fetcher(endpoint()+route,{method:method||(body?'POST':'GET'),headers:{'Content-Type':'application/json','X-ZapDMR-ZapChat-Protocol':'2',...(window.ZapDMRUpdater?.headers?.()||{}),...(c.token?{Authorization:'Bearer '+c.token}:{})},...(body?{body:JSON.stringify(body)}:{}),signal:combined});
       let data;try{data=await response.json();}catch{throw new Error('Resposta inválida do servidor da comunidade.');}
       if(!response.ok){if(data.code==='APP_UPDATE_REQUIRED')window.dispatchEvent(new Event('zapdmr:update-required'));const error=new Error(data.message||'A comunidade não respondeu.');Object.assign(error,{status:response.status,code:data.code,retryAfterSeconds:Math.max(0,Number(data.retryAfterSeconds||response.headers.get('Retry-After'))||0)});throw error;}return data;
     }
@@ -19,7 +19,7 @@
       try{return await request(route,body,method,signal);}catch(error){if(auth&&error.status===401&&getConfig().token){await renew();return request(route,body,method,signal);}throw error;}}
     function clear(){revision++;for(const key of fields)delete getConfig()[key];getConfig().account=null;}
     async function logout(){await request('/v1/auth/logout',{refreshToken:getConfig().refreshToken||''});clear();await save();}
-    async function fetchPrivate(path,options={}){const c=getConfig();if(c.refreshToken&&Number(c.accessExpiresAt)<Date.now()+60000)await renew();const send=()=>fetcher(endpoint()+path,{...options,headers:{...options.headers,...(getConfig().token?{Authorization:'Bearer '+getConfig().token}:{})}});let response=await send();if(response.status===401&&getConfig().token){await renew();response=await send();}return response;}
+    async function fetchPrivate(path,options={}){const c=getConfig();if(c.refreshToken&&Number(c.accessExpiresAt)<Date.now()+60000)await renew();const send=()=>fetcher(endpoint()+path,{...options,headers:{'X-ZapDMR-ZapChat-Protocol':'2',...options.headers,...(getConfig().token?{Authorization:'Bearer '+getConfig().token}:{})}});let response=await send();if(response.status===401&&getConfig().token){await renew();response=await send();}return response;}
     return{remote,renew,clear,assign,logout,fetchPrivate};
   };
 })();

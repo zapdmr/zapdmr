@@ -3,6 +3,7 @@ import {appReleases} from './app-releases.mjs';
 import {chatPush,pushConfigured} from './chat-push.mjs';
 import {sessionService} from './auth-sessions.mjs';
 import {chatInbox} from './chat-inbox.mjs';
+import {zapchatActivation} from './zapchat-activation.mjs';
 // GPL-3.0-only. Cloudflare Workers + D1 API; no Node compatibility flag required.
 // Route handling, CORS, security headers, static assets and scheduled cleanup
 // are composed by the Worker entry point. No credentials are generated here.
@@ -15,7 +16,7 @@ const releaseNotices=createReleaseNotifications({failure,json,body,rate,hash,sam
 
 function failure(status,message,details={}){return Object.assign(new Error(message),{status,...details});}
 function json(status,value,headers={}){return new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...headers}});}
-function errorResponse(error){return json(error.status||500,{message:error.status?error.message:'Não foi possível concluir o pedido. Tente novamente.',...(/^(SESSION_[A-Z_]+|APP_UPDATE_REQUIRED)$/.test(error.code||'')?{code:error.code}:{}),...(Number.isInteger(error.retryAfterSeconds)?{retryAfterSeconds:error.retryAfterSeconds}:{})});}
+function errorResponse(error){return json(error.status||500,{message:error.status?error.message:'Não foi possível concluir o pedido. Tente novamente.',...(/^(SESSION_[A-Z_]+|APP_UPDATE_REQUIRED|ZAPCHAT_ACTIVATION_REQUIRED)$/.test(error.code||'')?{code:error.code}:{}),...(Number.isInteger(error.retryAfterSeconds)?{retryAfterSeconds:error.retryAfterSeconds}:{})});}
 function hex(bytes){return Array.from(new Uint8Array(bytes),byte=>byte.toString(16).padStart(2,'0')).join('');}
 function unhex(value){return Uint8Array.from(value.match(/../g),part=>parseInt(part,16));}
 function base64(bytes){let text='';for(const byte of new Uint8Array(bytes))text+=String.fromCharCode(byte);return btoa(text);}
@@ -179,6 +180,7 @@ export async function handleApi(request,env,url=new URL(request.url)){
 async function api(request,env,url,config){
   const route=url.pathname,method=request.method,db=config.db;
   const activation=onboarding(config,{hash,seal,unseal,failure,publicUser,sessions:()=>sessionService(config,{hash,seal,unseal,randomToken,failure})});
+  const chatActivation=zapchatActivation(config,{env,hash,sameHash,seal,unseal,failure,rate,otpCode,randomToken,verificationMode,isOfficialPhoneHash,officialConfirmationUnavailable,reverseConfigured,deliverCode,otpMessage,challengeView,phoneVariants});
   if(route==='/v1/auth/activate'&&method==='POST'){await rate(config,request,'app-activate',10,600000);const raw=await body(request);return json(200,await activation.redeem(raw.code));}
   const noticeResponse=await releaseNotices.handleApi(request,env,url,config);if(noticeResponse)return noticeResponse;
   if(route==='/v1/status'&&method==='GET'){const mode=await verificationMode(config,env);return json(200,{version:'1.5.2',chatAttachments:true,maxAttachmentBytes:15728640,registration:true,verificationConfigured:mode!=='unavailable',verificationMode:mode,developmentMode:false,bridgeConnected:await bridgeConnected(config,env),downloadRequiresVerification:true,owner:env.OWNER_NAME,privacyEmail:env.PRIVACY_EMAIL,downloads:{android:downloadMetadata(env,config,'android'),windows:downloadMetadata(env,config,'windows')}});}
@@ -188,7 +190,8 @@ async function api(request,env,url,config){
       const match=/^ZapDMR CONFIRMAR ([A-Za-z0-9_-]{43}) (\d{6})$/.exec(String(raw.text||'').trim());
       if(!match)return json(200,{accepted:true,confirmed:false});
       const from=normalizePhone(raw.number),row=await db.prepare('SELECT c.*,r.phone_hash FROM codes c JOIN registrations r ON r.id=c.registration_id WHERE c.challenge_hash=? AND c.expires_at>? AND c.attempts<5 AND c.mode=?').bind(await hash(config,'otp-challenge:'+match[1]),now,'reverse').first();
-      if(!row||!await sameHash(config,row.registration_id+':'+match[2],row.hash))return json(200,{accepted:true,confirmed:false});
+      if(!row){const confirmed=await chatActivation.confirmReverse(match[1],match[2],from);return json(200,{accepted:true,confirmed});}
+      if(!await sameHash(config,row.registration_id+':'+match[2],row.hash))return json(200,{accepted:true,confirmed:false});
       const fromHashes=await Promise.all(phoneVariants(from).map(number=>hash(config,number)));
       if(!fromHashes.includes(row.phone_hash))return json(200,{accepted:true,confirmed:false});
       await db.prepare('UPDATE codes SET reverse_confirmed_at=? WHERE registration_id=? AND hash=? AND expires_at>? AND mode=?').bind(now,row.registration_id,row.hash,now,'reverse').run();return json(200,{accepted:true,confirmed:true});
@@ -198,7 +201,10 @@ async function api(request,env,url,config){
       const connected=raw.connected===true;await db.prepare('INSERT INTO whatsapp_bridge_state(id,last_seen_at,connected) VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET last_seen_at=excluded.last_seen_at,connected=excluded.connected').bind(now,connected?1:0).run();
       if(route.endsWith('/heartbeat'))return json(200,{ok:true});if(!connected)return json(200,{jobs:[]});
       const leaseId=randomToken(),jobs=await db.prepare(`UPDATE whatsapp_outbox SET status='sending',lease_until=?,lease_id=?,attempts=attempts+1 WHERE id IN(
-        SELECT q.id FROM whatsapp_outbox q JOIN codes c ON c.registration_id=q.registration_id AND c.hash=q.code_hash
+        SELECT q.id FROM whatsapp_outbox q JOIN (
+          SELECT registration_id,hash,mode,expires_at,'account' AS purpose FROM codes
+          UNION ALL SELECT registration_id,hash,mode,expires_at,'zapchat' AS purpose FROM zapchat_activation_codes
+        ) c ON c.registration_id=q.registration_id AND c.hash=q.code_hash AND c.purpose=q.purpose
         WHERE (q.status='queued' OR (q.status='sending' AND q.lease_until<?)) AND q.attempts<2 AND q.expires_at>? AND c.mode='bridge' AND c.expires_at>?
         ORDER BY q.created_at LIMIT 5) RETURNING id,payload_cipher,lease_id`).bind(now+60000,leaseId,now,now,now).all();
       return json(200,{jobs:await Promise.all(jobs.results.map(async job=>({id:job.id,leaseId:job.lease_id,...JSON.parse(await unseal(config,job.payload_cipher))})))});
@@ -207,10 +213,10 @@ async function api(request,env,url,config){
       if(!['sent','delivered','failed'].includes(raw.status)||!/^[-a-f0-9]{36}$/i.test(String(raw.id||''))||!/^[A-Za-z0-9_-]{43}$/.test(String(raw.leaseId||'')))throw failure(400,'Resultado de envio inválido.');
       // Retain the lease identity so a later delivery receipt can advance a submitted job.
       // Terminal delivered/failed jobs and ACKs from previous leases cannot be overwritten.
-      const job=await db.prepare("UPDATE whatsapp_outbox SET status=?,lease_until=0 WHERE id=? AND status IN ('sending','sent') AND lease_id=? RETURNING registration_id,code_hash").bind(raw.status,raw.id,raw.leaseId).first();
+      const job=await db.prepare("UPDATE whatsapp_outbox SET status=?,lease_until=0 WHERE id=? AND status IN ('sending','sent') AND lease_id=? RETURNING registration_id,code_hash,purpose").bind(raw.status,raw.id,raw.leaseId).first();
       if(job&&raw.status==='failed'&&reverseConfigured(env)){
         const registration=await db.prepare('SELECT phone_hash FROM registrations WHERE id=?').bind(job.registration_id).first();
-        if(!await isOfficialPhoneHash(config,env,registration?.phone_hash))await db.prepare("UPDATE codes SET mode='reverse' WHERE registration_id=? AND hash=? AND mode='bridge'").bind(job.registration_id,job.code_hash).run();
+        if(!await isOfficialPhoneHash(config,env,registration?.phone_hash))await db.prepare(job.purpose==='zapchat'?"UPDATE zapchat_activation_codes SET mode='reverse' WHERE registration_id=? AND hash=? AND mode='bridge'":"UPDATE codes SET mode='reverse' WHERE registration_id=? AND hash=? AND mode='bridge'").bind(job.registration_id,job.code_hash).run();
       }
       return json(200,{ok:true});
     }
@@ -295,6 +301,12 @@ async function api(request,env,url,config){
   }
   if(request.headers.get('X-ZapDMR-Platform')==='android'||/Android.*ZapDMR\//.test(request.headers.get('User-Agent')||'')){const release=await releases.latest(),code=Number(request.headers.get('X-ZapDMR-Version-Code')||0);if(release&&release.minSupportedCode>0&&(!Number.isSafeInteger(code)||code<release.minSupportedCode))throw failure(426,release.requiredReason||'Atualize o ZapDMR para usar esta versão do servidor.',{code:'APP_UPDATE_REQUIRED'});}
   const me=await currentUser(config,request);await rate(config,request,'authenticated',240,60000,me.id);
+  if(route==='/v1/zapchat/activation'&&method==='GET')return json(200,await chatActivation.read(me));
+  if(route==='/v1/zapchat/activation/request'&&method==='POST'){await rate(config,request,'zapchat-activation-request',6,600000,me.id);return json(200,await chatActivation.issue(me,request,await body(request)));}
+  if(route==='/v1/zapchat/activation/status'&&method==='POST'){await rate(config,request,'zapchat-activation-status',120,60000,me.id);return json(200,await chatActivation.status(me,await body(request)));}
+  if(route==='/v1/zapchat/activation/verify'&&method==='POST'){await rate(config,request,'zapchat-activation-verify',20,600000,me.id);return json(200,await chatActivation.verify(me,await body(request)));}
+  const zapchatRoute=/^\/v1\/(?:inbox|conversations|messages(?:\/|$)|directory|blocks|attachments(?:\/|$)|push(?:\/|$)|me\/photo$|users\/[a-f0-9-]{36}\/photo$)/i.test(route);
+  if(zapchatRoute)await chatActivation.requireAuthorization(me,request);
   if(route==='/v1/onboarding/activation'&&method==='POST'){await rate(config,request,'app-activation-create',6,600000,me.id);await body(request);return json(200,await activation.issue(me));}
   if(route==='/v1/onboarding/preferences'&&method==='GET')return json(200,await activation.read(me));
   if(route==='/v1/onboarding/preferences'&&method==='PUT')return json(200,await activation.save(me,await body(request)));
@@ -391,6 +403,7 @@ export async function cleanup(env){
     config.db.prepare('DELETE FROM sessions WHERE expires_at<?').bind(now),
     config.db.prepare('DELETE FROM auth_devices WHERE refresh_expires_at<? AND NOT EXISTS(SELECT 1 FROM session_devices d JOIN sessions s ON s.hash=d.session_hash WHERE d.device_id=auth_devices.id AND s.expires_at>?)').bind(now,now),
     config.db.prepare('DELETE FROM codes WHERE expires_at<?').bind(now),
+    config.db.prepare('DELETE FROM zapchat_activation_codes WHERE expires_at<?').bind(now),
     config.db.prepare('DELETE FROM whatsapp_outbox WHERE expires_at<?').bind(now),
     config.db.prepare('DELETE FROM attachments WHERE created_at<? AND NOT EXISTS(SELECT 1 FROM message_attachments ma WHERE ma.attachment_id=attachments.id)').bind(now-3600000),
     config.db.prepare('DELETE FROM registrations WHERE created_at<? AND NOT EXISTS(SELECT 1 FROM users WHERE users.callsign=registrations.callsign AND users.phone_hash=registrations.phone_hash)').bind(now-30*DAY)
