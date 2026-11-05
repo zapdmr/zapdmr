@@ -51,7 +51,7 @@ android {
         zapChatTest {
             initWith release
             applicationIdSuffix ".zapchattest"
-            versionNameSuffix "-zapchat-test.2"
+            versionNameSuffix "-zapchat-test.3"
             matchingFallbacks = ["release"]
             signingConfig signingConfigs.debug
             buildConfigField "boolean", "ZAPCHAT_TEST_BUILD", "true"
@@ -115,5 +115,5 @@ try {
 
 android.applicationVariants.all { variant ->
     if (variant.buildType.name == "carPreview") variant.outputs.all { versionCodeOverride = 15313 }
-    if (variant.buildType.name == "zapChatTest") variant.outputs.all { versionCodeOverride = 15621 }
+    if (variant.buildType.name == "zapChatTest") variant.outputs.all { versionCodeOverride = 15622 }
 }

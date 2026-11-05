@@ -1,0 +1,28 @@
+/* Experimental Android home. Radio behavior and element IDs remain unchanged. */
+.zapchat-messenger-icon{display:grid;place-items:center;width:21px;height:21px}.zapchat-messenger-icon svg{width:100%;height:100%;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.zapchat-messenger-icon svg path:last-child{stroke-width:3.2}
+body.zapchat-home-test .rc-top-contact{display:grid;place-items:center}
+@media(max-width:760px){
+ body.zapchat-home-test .bottom-nav{grid-template-columns:repeat(4,minmax(0,1fr))}
+ body.zapchat-home-test .chat-inbox-notice{top:calc(var(--topbar-height) + 7px);bottom:auto;max-width:410px;padding:10px 12px;font-size:11px}
+ body.zapchat-home-test .ptt-layout{display:block;height:100%}
+ body.zapchat-home-test .zapchat-test-operation{height:100%;display:grid;grid-template-rows:auto auto auto minmax(120px,1fr) auto auto;align-content:stretch;overflow:hidden;gap:7px;padding:9px}
+ body.zapchat-home-test .zapchat-test-operation>.participants-card{min-height:0;margin:0;padding:8px;border:1px solid var(--border);border-radius:12px;background:color-mix(in srgb,var(--surface) 88%,var(--green-soft));overflow:hidden}
+ body.zapchat-home-test .participants-card .heading{margin-bottom:3px}
+ body.zapchat-home-test .participants-card .heading .kicker{font-size:8px}
+ body.zapchat-home-test .participants-card .heading h2{font-size:16px}
+ body.zapchat-home-test .participants-card .participant-table-wrap{flex:1;max-height:none;min-height:0;margin-top:5px;overflow-y:auto;overflow-x:hidden;border:0;border-radius:0}
+ body.zapchat-home-test .participant-table{display:block;min-width:0;font-size:12px}
+ body.zapchat-home-test .participant-table thead{display:none}
+ body.zapchat-home-test .participant-table tbody{display:flex;flex-direction:column;gap:5px}
+ body.zapchat-home-test .participant-table tr{display:grid;grid-template-columns:minmax(72px,.8fr) minmax(90px,1.1fr) auto;gap:1px 8px;padding:7px 9px;border:1px solid var(--border);border-radius:10px;background:var(--surface)}
+ body.zapchat-home-test .participant-table td{min-width:0;padding:0;border:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ body.zapchat-home-test .participant-table td[data-column="callsign"]{grid-column:1;grid-row:1;color:var(--green-text);font-size:15px;font-weight:900}
+ body.zapchat-home-test .participant-table td[data-column="name"]{grid-column:2;grid-row:1;font-size:13px;font-weight:800}
+ body.zapchat-home-test .participant-table td[data-column="time"]{grid-column:3;grid-row:1;color:var(--muted);font-size:11px;text-align:right}
+ body.zapchat-home-test .participant-table td[data-column="location"],body.zapchat-home-test .participant-table td[data-column="city"]{grid-column:1/4;grid-row:2;color:var(--muted);font-size:12px}
+ body.zapchat-home-test .participant-table .country-flag{width:18px;height:13px;margin-right:5px;vertical-align:-2px}
+ body.zapchat-home-test .zapchat-test-operation>#audioMeters{order:20;flex:0 0 auto;min-height:47px;margin:0;padding:5px 7px;border:1px solid var(--border);border-radius:10px;background:var(--subtle)}
+ body.zapchat-home-test .zapchat-test-operation>#ptt{order:21;min-height:54px;margin:0;border-radius:16px;font-size:18px}
+ body.zapchat-home-test .zapchat-test-operation>#totState{order:22}
+ body.zapchat-home-test .zapchat-test-operation>.operation-hint{display:none}
+}
