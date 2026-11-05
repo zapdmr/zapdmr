@@ -36,6 +36,8 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         buildConfigField "boolean", "EXPERIMENTAL_CAR_VOX", "false"
+        buildConfigField "boolean", "ZAPCHAT_TEST_BUILD", "false"
+        manifestPlaceholders = [zapChatChannelId: "zapchat_messages"]
         versionCode 28
         versionName "1.5.6"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
@@ -46,6 +48,15 @@ android {
         }
     }
     buildTypes {
+        zapChatTest {
+            initWith release
+            applicationIdSuffix ".zapchattest"
+            versionNameSuffix "-zapchat-test.1"
+            matchingFallbacks = ["release"]
+            signingConfig signingConfigs.debug
+            buildConfigField "boolean", "ZAPCHAT_TEST_BUILD", "true"
+            manifestPlaceholders = [zapChatChannelId: "zapchat_test_messages"]
+        }
         carPreview {
             initWith release
             applicationIdSuffix ".carpreview"
@@ -104,4 +115,5 @@ try {
 
 android.applicationVariants.all { variant ->
     if (variant.buildType.name == "carPreview") variant.outputs.all { versionCodeOverride = 15313 }
+    if (variant.buildType.name == "zapChatTest") variant.outputs.all { versionCodeOverride = 15620 }
 }

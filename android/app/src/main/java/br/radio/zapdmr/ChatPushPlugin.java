@@ -26,8 +26,9 @@ import com.google.firebase.messaging.FirebaseMessaging;
 @CapacitorPlugin(name="ZapChatPush",permissions={@Permission(alias="notifications",strings={Manifest.permission.POST_NOTIFICATIONS})})
 public final class ChatPushPlugin extends Plugin {
     private static long lastToneAt=0;
-    static final String CHANNEL="zapchat_messages";
-    static void channel(Context context){if(Build.VERSION.SDK_INT>=26){NotificationChannel channel=new NotificationChannel(CHANNEL,"Mensagens ZapChat",NotificationManager.IMPORTANCE_LOW);channel.setSound(null,null);channel.enableVibration(false);context.getSystemService(NotificationManager.class).createNotificationChannel(channel);}}
+    static final String CHANNEL=BuildConfig.ZAPCHAT_TEST_BUILD?"zapchat_test_messages":"zapchat_messages";
+    private static String appLabel(){return BuildConfig.ZAPCHAT_TEST_BUILD?"ZapChat Teste":"ZapChat";}
+    static void channel(Context context){if(Build.VERSION.SDK_INT>=26){NotificationChannel channel=new NotificationChannel(CHANNEL,BuildConfig.ZAPCHAT_TEST_BUILD?"Mensagens ZapChat Teste":"Mensagens ZapChat",NotificationManager.IMPORTANCE_LOW);channel.setSound(null,null);channel.enableVibration(false);context.getSystemService(NotificationManager.class).createNotificationChannel(channel);}}
     @Override public void load(){channel(getContext());}
     @PluginMethod public void status(PluginCall call){
         boolean configured=!FirebaseApp.getApps(getContext()).isEmpty();boolean enabled=getContext().getSharedPreferences("zapdmr_chat_push",Context.MODE_PRIVATE).getBoolean("enabled",false);
@@ -51,7 +52,7 @@ public final class ChatPushPlugin extends Plugin {
             if(Build.VERSION.SDK_INT<33||ContextCompat.checkSelfPermission(getContext(),Manifest.permission.POST_NOTIFICATIONS)==PackageManager.PERMISSION_GRANTED){
                 channel(getContext());Intent intent=new Intent(getContext(),MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP|Intent.FLAG_ACTIVITY_SINGLE_TOP).putExtra("zapdmrPeer",peer).putExtra("zapdmrMessage",id).putExtra("zapdmrChatAccount",account);
                 PendingIntent pending=PendingIntent.getActivity(getContext(),id.hashCode(),intent,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
-                NotificationManagerCompat.from(getContext()).notify("zapchat",id.hashCode(),new NotificationCompat.Builder(getContext(),CHANNEL).setSmallIcon(android.R.drawable.stat_notify_chat).setContentTitle("ZapChat · "+name).setContentText("Nova mensagem privada. Toque para abrir no ZapDMR.").setContentIntent(pending).setAutoCancel(true).setSilent(true).setVisibility(NotificationCompat.VISIBILITY_PRIVATE).build());
+                NotificationManagerCompat.from(getContext()).notify("zapchat",id.hashCode(),new NotificationCompat.Builder(getContext(),CHANNEL).setSmallIcon(android.R.drawable.stat_notify_chat).setContentTitle(appLabel()+" · "+name).setContentText(BuildConfig.ZAPCHAT_TEST_BUILD?"Nova mensagem privada no aplicativo de teste.":"Nova mensagem privada. Toque para abrir no ZapDMR.").setContentIntent(pending).setAutoCancel(true).setSilent(true).setVisibility(NotificationCompat.VISIBILITY_PRIVATE).build());
             }
         }
         call.resolve();
@@ -70,6 +71,6 @@ public final class ChatPushPlugin extends Plugin {
         if(Build.VERSION.SDK_INT>=33&&ContextCompat.checkSelfPermission(context,Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)return;
         channel(context);Intent intent=new Intent(context,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP|Intent.FLAG_ACTIVITY_SINGLE_TOP).putExtra("zapdmrPeer",peer).putExtra("zapdmrMessage",id);
         PendingIntent pending=PendingIntent.getActivity(context,id.hashCode(),intent,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
-        NotificationManagerCompat.from(context).notify(id.hashCode(),new NotificationCompat.Builder(context,CHANNEL).setSmallIcon(android.R.drawable.stat_notify_chat).setContentTitle("ZapDMR · ZapChat").setContentText("Você tem uma nova mensagem. Toque para abrir.").setContentIntent(pending).setAutoCancel(true).setSilent(true).setVisibility(NotificationCompat.VISIBILITY_PRIVATE).build());
+        NotificationManagerCompat.from(context).notify(id.hashCode(),new NotificationCompat.Builder(context,CHANNEL).setSmallIcon(android.R.drawable.stat_notify_chat).setContentTitle(BuildConfig.ZAPCHAT_TEST_BUILD?"ZapDMR · ZapChat Teste":"ZapDMR · ZapChat").setContentText("Você tem uma nova mensagem. Toque para abrir.").setContentIntent(pending).setAutoCancel(true).setSilent(true).setVisibility(NotificationCompat.VISIBILITY_PRIVATE).build());
     }
 }

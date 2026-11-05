@@ -22,7 +22,7 @@
  async function check(force=false){
    if(!plugin||inFlight||busy||radioPrepared||Date.now()-lastCheckAt<(force?60000:interval))return;
    inFlight=true;lastCheckAt=Date.now();clearTimeout(retry);
-   try{info=await plugin.info();const data=await plugin.check(),release=data.release;
+   try{info=await plugin.info();if(info.experimental){lastError='';if(manualStatus)manualStatus.textContent='Versão experimental independente. Atualizações automáticas oficiais estão desativadas.';return;}const data=await plugin.check(),release=data.release;
      if(release&&!valid(release))throw new Error('O servidor retornou um manifesto inválido.');
      const minutes=Number(release?.notificationPolicy?.checkIntervalMinutes);if(Number.isFinite(minutes))interval=Math.max(15,Math.min(1440,minutes))*60000;
      reminderMs=Math.max(1,Math.min(168,Number(release?.notificationPolicy?.remindAfterHours)||24))*3600000;

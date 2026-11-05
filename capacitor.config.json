@@ -1,6 +1,6 @@
 {
-  "appId": "br.radio.zapdmr",
-  "appName": "ZapDMR",
+  "appId": "br.radio.zapdmr.zapchattest",
+  "appName": "ZapDMR — ZapChat Teste",
   "webDir": "web",
   "server": { "androidScheme": "https" }
 }
