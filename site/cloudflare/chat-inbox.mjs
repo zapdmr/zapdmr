@@ -1,15 +1,15 @@
 export function chatInbox(config,h){
  const db=config.db;
- const peerView=row=>({id:row.id,callsign:row.callsign,dmrId:row.dmr_id,displayName:row.display_name||row.callsign});
+ const peerView=row=>({id:row.id,callsign:row.callsign,dmrId:row.dmr_id,displayName:row.display_name||row.callsign,online:Number(row.presence_at)>Date.now()-120000,...(row.photo_version?{photoVersion:Number(row.photo_version),photoUrl:`/v1/users/${row.id}/photo?v=${row.photo_version}`}:{})});
  async function conversations(me,before=0){
   const rows=await db.prepare(`WITH threads AS (
    SELECT CASE WHEN sender=? THEN recipient ELSE sender END AS peer,MAX(at) AS last_at,
     SUM(CASE WHEN recipient=? AND read_at IS NULL THEN 1 ELSE 0 END) AS unread
    FROM messages WHERE sender=? OR recipient=? GROUP BY peer)
-   SELECT u.*,t.last_at,t.unread FROM threads t JOIN users u ON u.id=t.peer
+   SELECT u.*,t.last_at,t.unread,p.version AS photo_version,(SELECT MAX(last_seen_at) FROM auth_devices a WHERE a.user_id=u.id AND a.revoked_at IS NULL AND a.refresh_expires_at>?) AS presence_at FROM threads t JOIN users u ON u.id=t.peer LEFT JOIN profile_photos p ON p.user_id=u.id
    WHERE u.whatsapp_verified=1 AND (?=0 OR t.last_at<?) AND NOT EXISTS(
     SELECT 1 FROM blocks b WHERE (b.owner=? AND b.peer=u.id) OR (b.owner=u.id AND b.peer=?))
-   ORDER BY t.last_at DESC,u.id LIMIT 50`).bind(me.id,me.id,me.id,me.id,before,before,me.id,me.id).all();
+   ORDER BY t.last_at DESC,u.id LIMIT 50`).bind(me.id,me.id,me.id,me.id,Date.now(),before,before,me.id,me.id).all();
   return{conversations:rows.results.map(row=>({peer:peerView(row),lastAt:row.last_at,unread:Number(row.unread)})),hasMore:rows.results.length===50,before:rows.results.at(-1)?.last_at||0};
  }
  async function inbox(me){

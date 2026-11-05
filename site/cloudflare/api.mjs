@@ -6,7 +6,7 @@ import {chatInbox} from './chat-inbox.mjs';
 // GPL-3.0-only. Cloudflare Workers + D1 API; no Node compatibility flag required.
 // Route handling, CORS, security headers, static assets and scheduled cleanup
 // are composed by the Worker entry point. No credentials are generated here.
-import {attachments} from './attachments.mjs';
+import {attachments,profilePhotos} from './attachments.mjs';
 import {createReleaseNotifications} from './release-notifications.mjs';
 const encoder=new TextEncoder(),decoder=new TextDecoder('utf-8',{fatal:true});
 const configs=new WeakMap();
@@ -85,11 +85,11 @@ async function rate(config,request,bucket,max=60,period=60000,identity){
 async function currentUser(config,request){
   const token=(request.headers.get('Authorization')||'').replace(/^Bearer /,'');
   if(!/^[A-Za-z0-9_-]{43}$/.test(token))throw failure(401,'Entre na comunidade com o código recebido no seu número.',{code:'SESSION_INVALID'});
-  const row=await config.db.prepare('SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN session_devices d ON d.session_hash=s.hash LEFT JOIN auth_devices a ON a.id=d.device_id WHERE s.hash=? AND s.expires_at>? AND u.whatsapp_verified=1 AND (d.device_id IS NULL OR a.revoked_at IS NULL AND a.refresh_expires_at>?)').bind(await hash(config,token),Date.now(),Date.now()).first();
-  if(!row)throw failure(401,'Sessão expirada ou revogada.',{code:'SESSION_EXPIRED'});return row;
+  const now=Date.now(),row=await config.db.prepare('SELECT u.*,a.id AS session_device_id,a.last_seen_at AS session_last_seen FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN session_devices d ON d.session_hash=s.hash LEFT JOIN auth_devices a ON a.id=d.device_id WHERE s.hash=? AND s.expires_at>? AND u.whatsapp_verified=1 AND (d.device_id IS NULL OR a.revoked_at IS NULL AND a.refresh_expires_at>?)').bind(await hash(config,token),now,now).first();
+  if(!row)throw failure(401,'Sessão expirada ou revogada.',{code:'SESSION_EXPIRED'});if(row.session_device_id&&Number(row.session_last_seen)<now-60000)await config.db.prepare('UPDATE auth_devices SET last_seen_at=? WHERE id=? AND revoked_at IS NULL').bind(now,row.session_device_id).run();return row;
 }
-async function publicUser(config,row,own=false){return {id:row.id,callsign:row.callsign,dmrId:row.dmr_id,displayName:row.display_name||row.callsign,verified:Boolean(row.whatsapp_verified),whatsapp_verified:Boolean(row.whatsapp_verified),verificationMethod:row.verification_method,sharePhone:Boolean(row.share_phone),...(own?await releaseNotices.preference(config,row.id):{}),...(own||row.share_phone?{whatsapp:await unseal(config,row.phone_cipher)}:{})};}
-async function publicMessage(config,row,own){return {id:row.id,from:row.sender,to:row.recipient,text:await unseal(config,row.body_cipher),at:row.at,readAt:row.read_at,deliveredAt:row.delivered_at||row.read_at||null,direction:row.sender===own?'out':'in',state:row.read_at?'read':'sent',...(row.attachment_id?{attachment:{id:row.attachment_id,name:await unseal(config,row.attachment_name),size:row.attachment_size,mime:row.attachment_mime,kind:row.attachment_mime.startsWith('image/')?'image':'document'}}:{})};}
+async function publicUser(config,row,own=false){const now=Date.now(),state=await config.db.prepare('SELECT p.version AS photo_version,(SELECT MAX(last_seen_at) FROM auth_devices WHERE user_id=? AND revoked_at IS NULL AND refresh_expires_at>?) AS presence_at FROM users u LEFT JOIN profile_photos p ON p.user_id=u.id WHERE u.id=?').bind(row.id,now,row.id).first();return {id:row.id,callsign:row.callsign,dmrId:row.dmr_id,displayName:row.display_name||row.callsign,verified:Boolean(row.whatsapp_verified),whatsapp_verified:Boolean(row.whatsapp_verified),verificationMethod:row.verification_method,sharePhone:Boolean(row.share_phone),online:Number(state?.presence_at)>now-120000,...(state?.photo_version?{photoVersion:Number(state.photo_version),photoUrl:`/v1/users/${row.id}/photo?v=${state.photo_version}`} :{}),...(own?await releaseNotices.preference(config,row.id):{}),...(own||row.share_phone?{whatsapp:await unseal(config,row.phone_cipher)}:{})};}
+async function publicMessage(config,row,own){return {id:row.id,from:row.sender,to:row.recipient,text:await unseal(config,row.body_cipher),at:row.at,readAt:row.read_at,deliveredAt:row.delivered_at||row.read_at||null,direction:row.sender===own?'out':'in',state:row.read_at?'read':'sent',...(row.attachment_id?{attachment:{id:row.attachment_id,name:await unseal(config,row.attachment_name),size:row.attachment_size,mime:row.attachment_mime,kind:row.attachment_mime.startsWith('image/')?'image':row.attachment_mime.startsWith('video/')?'video':row.attachment_mime.startsWith('audio/')?'audio':'document'}}:{})};}
 function downloadMetadata(env,config,platform){
   if(!config.downloads[platform])return {available:false};
   const prefix=platform==='android'?'DOWNLOAD_ANDROID':'DOWNLOAD_WINDOWS',bytes=Number(env[prefix+'_BYTES']),sha256=env[prefix+'_SHA256'];
@@ -308,6 +308,10 @@ async function api(request,env,url,config){
   if(route==='/v1/conversations'&&method==='GET')return json(200,await inbox.conversations(me,cursor(url.searchParams.get('before'))));
   if(route==='/v1/messages/delivered'&&method==='POST'){const raw=await body(request);return json(200,await inbox.delivered(me,raw.ids));}
   if(route==='/v1/me'&&method==='GET')return json(200,{user:await publicUser(config,me,true)});
+  if(route==='/v1/me/photo'&&method==='PUT')return profilePhotos(config,{pairAvailable,rate,json}).upload(request,me);
+  if(route==='/v1/me/photo'&&method==='DELETE')return profilePhotos(config,{pairAvailable,rate,json}).remove(me);
+  const profilePhotoRoute=route.match(/^\/v1\/users\/([a-f0-9-]{36})\/photo$/i);
+  if(profilePhotoRoute&&method==='GET')return profilePhotos(config,{pairAvailable,rate,json}).download(profilePhotoRoute[1],request,me);
   if(route==='/v1/me'&&method==='PATCH'){const raw=await body(request),updated=await db.prepare('UPDATE users SET share_phone=?,display_name=? WHERE id=? RETURNING *').bind(typeof raw.sharePhone==='boolean'?(raw.sharePhone?1:0):me.share_phone,typeof raw.displayName==='string'?raw.displayName.trim().slice(0,80):me.display_name||'',me.id).first();await releaseNotices.setPreference(config,me.id,raw.updateNotifications);return json(200,{user:await publicUser(config,updated,true)});}
   if(route==='/v1/me'&&method==='DELETE'){await db.batch([db.prepare('DELETE FROM registrations WHERE phone_hash=? AND callsign=?').bind(me.phone_hash,me.callsign),db.prepare('DELETE FROM users WHERE id=?').bind(me.id)]);return json(200,{deleted:true});}
   if(route==='/v1/directory'&&method==='GET'){

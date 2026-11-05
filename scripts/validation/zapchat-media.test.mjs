@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import {fixture} from './chat-fixture.mjs';
+const f=await fixture(),to=f.users.TEST1B;
+const upload=async(name,bytes)=>{const result=await f.request('TEST1A','/v1/attachments?to='+to+'&name='+name,bytes);const data=await result.json();assert.equal(result.response.status,201,JSON.stringify(data));return data.attachment;};
+const mp4=await upload('radio.mp4',new Uint8Array([0,0,0,16,0x66,0x74,0x79,0x70,0x69,0x73,0x6f,0x6d,0,0,0,0]));
+assert.equal(mp4.kind,'video');assert.equal(mp4.mime,'video/mp4');
+const audio=await upload('voz.webm',new Uint8Array([0x1a,0x45,0xdf,0xa3,0x9f,0x42,0x86,0x81]));
+assert.equal(audio.kind,'audio');assert.equal(audio.mime,'audio/webm');
+await f.request('TEST1A','/v1/messages',{to,text:'Vídeo',attachmentId:mp4.id,clientId:'media_request_video_0001'});
+await f.request('TEST1A','/v1/messages',{to,text:'Áudio',attachmentId:audio.id,clientId:'media_request_audio_0001'});
+const history=await f.request('TEST1B','/v1/messages?peer='+f.users.TEST1A+'&receiptAfter=0'),data=await history.json();
+assert.deepEqual(data.messages.map(row=>row.attachment.kind),['video','audio']);
+console.log('PASS: private video and voice-message attachment types, content signatures, encrypted storage metadata and conversation retrieval. Synthetic bytes only; no camera or microphone used.');
