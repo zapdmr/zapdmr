@@ -20,8 +20,7 @@ let disconnectInProgress = false;
 let talkgroupBurstStatus = { pending: false, purpose: null, talkgroupId: null };
 const audioMeterResetTimers = { TX: undefined, RX: undefined };
 const audioLevels = { TX: 0, RX: 0 };
-let categoryValue = 'Nacionais';
-let quickCatalogScope = 'national';
+let scanCatalogScope = 'national';
 let activityFilter = 'all';
 let catalogActivitySignature = '';
 let scanEnabled = false;
@@ -200,17 +199,27 @@ function setTheme(value) {
 }
 
 function categoryName(value) {
-  return value === 'Mundiais' || value === 'Mundiais/Países' ? 'Mundiais' : 'Nacionais';
+  if (value === 'Mundiais' || value === 'Mundiais/Países') return 'Mundiais';
+  if (['Nacionais', 'Regiões', 'Estados'].includes(value)) return 'Nacionais';
+  return 'Sem categoria';
 }
 
-// Preserve older custom TGs while presenting only the two current categories.
+// Only explicit catalog metadata may place a TG in a scan category.
 function catalogCategory(group) {
+  const legacyCategory = String(group.legacyCategory || '').trim();
+  const recognizedLegacy = ['Nacionais', 'Regiões', 'Estados', 'Mundiais', 'Mundiais/Países'].includes(legacyCategory);
+  if (legacyCategory && !recognizedLegacy) {
+    const bundled = window.ZapDMRCatalog.bundled.find(item => Number(item.id) === Number(group.id));
+    if (bundled?.category === 'Mundiais' || bundled?.category === 'Mundiais/Países') return 'Mundiais';
+    if (['Nacionais', 'Regiões', 'Estados'].includes(bundled?.category)) return 'Nacionais';
+    return null;
+  }
   if (group.category === 'Mundiais' || group.category === 'Mundiais/Países') return 'Mundiais';
   if (['Nacionais', 'Regiões', 'Estados'].includes(group.category)) return 'Nacionais';
   const bundled = window.ZapDMRCatalog.bundled.find(item => Number(item.id) === Number(group.id));
   if (bundled?.category === 'Mundiais' || bundled?.category === 'Mundiais/Países') return 'Mundiais';
   if (['Nacionais', 'Regiões', 'Estados'].includes(bundled?.category)) return 'Nacionais';
-  return /^724/.test(String(group.id)) || [1, 2, 8, 9, 915, 4000].includes(Number(group.id)) ? 'Nacionais' : 'Mundiais';
+  return null;
 }
 
 function catalogCategories() {
@@ -225,14 +234,36 @@ function matchesCatalogCategory(group, category) {
   return category === 'all' || (category === 'Nacionais' ? isNationalGroup(group) : catalogCategory(group) === category);
 }
 
+function normalizeScanCatalogScope(scope) {
+  return ['all', 'national', 'world'].includes(scope) ? scope : 'all';
+}
+
+function scanScopeCategory(scope = scanCatalogScope) {
+  return scope === 'national' ? 'Nacionais' : scope === 'world' ? 'Mundiais' : 'all';
+}
+
+function scanScopeLabel(scope = scanCatalogScope) {
+  return scope === 'national' ? 'Nacionais' : scope === 'world' ? 'Mundiais' : 'Todas';
+}
+
+function matchesScanCatalogScope(group, scope = scanCatalogScope) {
+  return matchesCatalogCategory(group, scanScopeCategory(scope));
+}
+
+function setScanCatalogScope(scope) {
+  scanCatalogScope = normalizeScanCatalogScope(scope);
+  renderCategories();
+  renderGroups();
+  if (scanEnabled) void scanTalkgroupsTick();
+}
+
 function renderQuickTalkgroups() {
-  const visible = settings.xlxModule==='C'?[xlxGroup]:groups.filter(group => quickCatalogScope === 'national' ? isNationalGroup(group)
-    : quickCatalogScope === 'world' ? catalogCategory(group) === 'Mundiais' : true);
+  const visible = settings.xlxModule==='C'?[xlxGroup]:groups.filter(group => matchesScanCatalogScope(group));
   const current = groups.find(group => group.id === Number(settings.selectedTalkgroupId));
   const outside = current && !visible.includes(current);
   updateQuickTalkgroupIndicators();
   document.querySelectorAll('[data-quick-catalog-filter]').forEach(button => {
-    const active = button.dataset.quickCatalogFilter === quickCatalogScope;
+    const active = button.dataset.quickCatalogFilter === scanCatalogScope;
     button.classList.toggle('active', active);
     button.setAttribute('aria-pressed', String(active));
   });
@@ -247,7 +278,7 @@ function openQuickTalkgroupPicker() {
   if ($('#quickTalkgroupDialog').open) return;
   quickPickerSnapshot = (settings.xlxModule==='C'?[xlxGroup]:groups).map(group => ({...group, category: catalogCategory(group), active: hasRecentActivity(group.id)}));
   quickPickerSelectedId = Number(settings.selectedTalkgroupId);
-  quickPickerScope = quickCatalogScope;
+  quickPickerScope = scanCatalogScope;
   $('#quickTalkgroupSearch').value = '';
   renderQuickTalkgroupPicker();
   $('#quickTalkgroupDialog').showModal();
@@ -490,7 +521,7 @@ function renderGroups() {
 }
 
 function filteredCatalogGroups(status = activityFilter) {
-  const source = groups.filter(group => matchesCatalogCategory(group, categoryValue)
+  const source = groups.filter(group => matchesScanCatalogScope(group)
     && (status !== 'favorites' || settings.favorites.map(Number).includes(group.id)));
   return catalogActivity.filter(source, { category: 'all', query: $('#search').value,
     status: status === 'favorites' ? 'all' : status, activity: talkgroupActivity });
@@ -521,7 +552,16 @@ async function scanTalkgroupsTick() {
     $('#scanStatus').textContent = 'Scan pausado durante a transmissão.';
     return;
   }
-  const pool=settings.console?.scan?.favoritesOnly?filteredCatalogGroups('all').filter(item=>settings.favorites.includes(item.id)):filteredCatalogGroups('all');
+  if (gatewayStatus.rxBusy) {
+    $('#scanStatus').textContent = 'Scan pausado durante a recepção.';
+    return;
+  }
+  const scopedGroups = groups.filter(group => matchesScanCatalogScope(group));
+  const pool=settings.console?.scan?.favoritesOnly?scopedGroups.filter(item=>settings.favorites.map(Number).includes(item.id)):scopedGroups;
+  if (!pool.length) {
+    $('#scanStatus').textContent = `Scan: nenhuma TG elegível em ${scanScopeLabel()}.`;
+    return;
+  }
   const target = catalogActivity.scanTarget(pool, talkgroupActivity,
     settings.selectedTalkgroupId, scanSelectedSince,Date.now(),Math.max(0,Math.min(30,Number(settings.console?.scan?.holdSeconds??4)))*1000);
   if (!target) { $('#scanStatus').textContent = 'Scan: a procurar TGs com atividade…'; return; }
@@ -545,7 +585,7 @@ function refreshCatalogActivity() {
 
 function renderCategories() {
   const values = catalogCategories();
-  if (categoryValue !== 'all' && !values.includes(categoryValue)) categoryValue = 'all';
+  const categoryValue = scanScopeCategory();
   const select = $('#category');
   select.replaceChildren(new Option('Todas as categorias', 'all'), ...values.map((value) => new Option(value, value)));
   select.value = categoryValue;
@@ -558,7 +598,7 @@ function renderCategories() {
     button.textContent = label;
     button.setAttribute('aria-pressed', String(categoryValue === value));
     if (value === 'Nacionais') button.title = 'Brasil: nacionais, regiões e estados';
-    button.onclick = () => { categoryValue = value; select.value = value; renderCategories(); renderGroups(); };
+    button.onclick = () => setScanCatalogScope(value === 'Nacionais' ? 'national' : value === 'Mundiais' ? 'world' : 'all');
     chips.append(button);
   }
 }
@@ -1020,7 +1060,7 @@ async function importMobileFirmware(target, useNetwork = false) {
 }
 
 $('#search').oninput = renderGroups;
-$('#category').onchange = (event) => { categoryValue = event.target.value; renderCategories(); renderGroups(); };
+$('#category').onchange = (event) => setScanCatalogScope(event.target.value === 'Nacionais' ? 'national' : event.target.value === 'Mundiais' ? 'world' : 'all');
 document.querySelectorAll('[data-activity-filter]').forEach((button) => {
   button.onclick = () => {
     activityFilter = button.dataset.activityFilter;
@@ -1074,9 +1114,7 @@ document.querySelectorAll('[data-picker-filter]').forEach(button => {
 });
 document.querySelectorAll('[data-quick-catalog-filter]').forEach(button => {
   button.onclick = () => {
-    quickCatalogScope = button.dataset.quickCatalogFilter;
-    renderQuickTalkgroups();
-    updateQuickTalkgroupIndicators();
+    setScanCatalogScope(button.dataset.quickCatalogFilter);
   };
 });
 $('#serverType').onchange = (event) => {

@@ -10,8 +10,8 @@ class Element {
 const nodes=new Map(),el=id=>{if(!nodes.has(id))nodes.set(id,new Element());return nodes.get(id);};
 const context=vm.createContext({document:{createElement:()=>new Element(),querySelectorAll:()=>[]},$:el,
   groups:[{id:724,name:'Brasil Nacional',category:'Nacionais'},{id:91,name:'Mundial / World-wide',category:'Mundiais'}],
-  settings:{selectedTalkgroupId:724},quickCatalogScope:'all',activity:true,
-  catalogCategory:g=>g.category,hasRecentActivity:()=>context.activity,selected:null,
+  settings:{selectedTalkgroupId:724},scanCatalogScope:'all',activity:true,
+  catalogCategory:g=>g.category,matchesScanCatalogScope:()=>true,hasRecentActivity:()=>context.activity,selected:null,
   selectGroup:id=>context.selected=id,
 });
 context.groupSelected=()=>context.groups.find(g=>g.id===context.settings.selectedTalkgroupId);
