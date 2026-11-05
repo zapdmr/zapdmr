@@ -24,6 +24,25 @@ tasks.register('prepareBundledFirmware') {
 }
 tasks.named('preBuild').configure { dependsOn 'prepareBundledFirmware' }
 
+// RadioSessionService loads this helper by its exact library name.  A build
+// without it installs normally but cannot initialise the vocoder, leaving RX,
+// TX and PTT unavailable.  Keep the known-good 1.5.6 binaries verifiable.
+tasks.register('verifyBundledVocoderHelper') {
+    doLast {
+        def hashes = [
+            'arm64-v8a': 'ba6c59e0c08394791378d9e46e55363287d155ad90798bea6bad59001d466903',
+            'armeabi-v7a': '1ccda2de1fb3f71cd31994ba31242576176b3e98ab5ce7778226a4d7114a993f'
+        ]
+        hashes.each { abi, expected ->
+            def helper = file("src/main/jniLibs/${abi}/libqso_dmr_vocoder_helper.so")
+            if (!helper.isFile()) throw new GradleException("Vocoder helper ausente para ${abi}; APK não gerado.")
+            def digest = java.security.MessageDigest.getInstance('SHA-256').digest(helper.bytes).encodeHex().toString()
+            if (digest != expected) throw new GradleException("SHA-256 inválido para o vocoder helper ${abi}; APK não gerado.")
+        }
+    }
+}
+tasks.named('preBuild').configure { dependsOn 'verifyBundledVocoderHelper' }
+
 android {
     buildFeatures { buildConfig true }
     namespace = "br.radio.zapdmr"
@@ -51,7 +70,7 @@ android {
         zapChatTest {
             initWith release
             applicationIdSuffix ".zapchattest"
-            versionNameSuffix "-zapchat-test.3"
+            versionNameSuffix "-zapchat-test.4"
             matchingFallbacks = ["release"]
             signingConfig signingConfigs.debug
             buildConfigField "boolean", "ZAPCHAT_TEST_BUILD", "true"
@@ -115,5 +134,5 @@ try {
 
 android.applicationVariants.all { variant ->
     if (variant.buildType.name == "carPreview") variant.outputs.all { versionCodeOverride = 15313 }
-    if (variant.buildType.name == "zapChatTest") variant.outputs.all { versionCodeOverride = 15622 }
+    if (variant.buildType.name == "zapChatTest") variant.outputs.all { versionCodeOverride = 15623 }
 }

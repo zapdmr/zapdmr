@@ -362,9 +362,9 @@ public final class MobileAudioPlugin extends Plugin {
 
     @PluginMethod public void setAudioLevels(PluginCall call){
 
-        int tx=call.getInt("txGainPercent",100),rx=call.getInt("rxVolumePercent",100);
+        int tx=call.getInt("txGainPercent",260),rx=call.getInt("rxVolumePercent",260);
 
-        if(tx<0||tx>260||rx<0||rx>260){call.reject("Ganho e volume devem estar entre 0 e 260%.");return;}
+        if(tx<0||tx>300||rx<0||rx>300){call.reject("Ganho e volume devem estar entre 0 e 300%.");return;}
 
         Intent intent=new Intent(getContext(),RadioSessionService.class).setAction(RadioSessionService.ACTION_AUDIO_LEVELS).putExtra("txGainPercent",tx).putExtra("rxVolumePercent",rx);
 

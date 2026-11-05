@@ -2,7 +2,7 @@ const $ = (selector) => document.querySelector(selector);
 const mobileAudio = window.ZapDMRMobileAudio;
 const catalogActivity = window.ZapDMRTalkgroups;
 const defaultFrequencyHz = '433500000';
-const defaults = window.ZapDMRProtocol.normalize({ callsign: '', dmrId: '', essid: '02', rxFrequencyHz: defaultFrequencyHz, txFrequencyHz: defaultFrequencyHz, masterHost: '', masterPort: 62031, serverType: 'brandmeister', staticTalkgroups: '', locationName: '', latitude: '', longitude: '', defaultSlot: 1, theme: 'auto', autoConnectOnStartup: true, autoReconnect: true, totLimitSeconds: 180, totWarningSeconds: 10, totVisualAlert: true, totSoundAlert: true, txGainPercent: 100, rxVolumePercent: 100, selectedTalkgroupId: 724, favorites: [724] });
+const defaults = window.ZapDMRProtocol.normalize({ callsign: '', dmrId: '', essid: '02', rxFrequencyHz: defaultFrequencyHz, txFrequencyHz: defaultFrequencyHz, masterHost: '', masterPort: 62031, serverType: 'brandmeister', staticTalkgroups: '', locationName: '', latitude: '', longitude: '', defaultSlot: 1, theme: 'auto', autoConnectOnStartup: true, autoReconnect: true, totLimitSeconds: 180, totWarningSeconds: 10, totVisualAlert: true, totSoundAlert: true, txGainPercent: 260, rxVolumePercent: 260, selectedTalkgroupId: 724, favorites: [724] });
 let settings = { ...defaults };
 let groups = window.ZapDMRCatalog.bundled;
 let apiAvailable = false;
