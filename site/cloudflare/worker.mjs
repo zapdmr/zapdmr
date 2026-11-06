@@ -32,7 +32,7 @@ function protect(response, request, env) {
   if (origin && allowedOrigin(origin, env.PUBLIC_ORIGIN, request.url)) {
     headers.set('Access-Control-Allow-Origin', origin);
     headers.set('Vary', 'Origin');
-    headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-ZapDMR-Platform, X-ZapDMR-Version-Code');
+    headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-ZapDMR-Platform, X-ZapDMR-Version-Code, X-ZapDMR-ZapChat-Protocol');
     headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   }
   return new Response(request.method === 'HEAD' ? null : response.body, {
