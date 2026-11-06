@@ -32,7 +32,7 @@ export function automaticAprsAuthorized(
     String(community?.endpoint ?? '').replace(/\/$/, '') === 'https://www.zapdmr.com.br' &&
     typeof community?.token === 'string' && community.token.length > 0 &&
     account?.verified !== false &&
-    account?.whatsapp_verified === true &&
+    (account?.whatsapp_verified === true || account?.email_verified === true) &&
     profileCallsign &&
     profileCallsign === aprsBaseCallsign(requestedCallsign) &&
     profileCallsign === aprsBaseCallsign(account.callsign) &&

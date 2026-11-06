@@ -1,4 +1,4 @@
-param([switch]$DebugApk,[switch]$SkipNativeBuild)
+param([switch]$DebugApk,[switch]$ZapChatTestApk,[switch]$SkipNativeBuild)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $env:GRADLE_USER_HOME = Join-Path $projectRoot '.gradle-user-home'
@@ -57,12 +57,24 @@ try {
   if (-not (Test-Path -LiteralPath $gradle)) { throw 'Gradle Wrapper não encontrado em android/gradlew.bat.' }
   Push-Location (Join-Path $projectRoot 'android')
   try {
-    $buildTask = if ($DebugApk) { 'assembleDebug' } else { 'assembleRelease' }
+    $buildTask = if ($ZapChatTestApk) { 'assembleZapChatTest' } elseif ($DebugApk) { 'assembleDebug' } else { 'assembleRelease' }
     & $gradle --no-daemon --max-workers=2 --console=plain $buildTask
     if ($LASTEXITCODE -ne 0) { throw 'Gradle falhou ao gerar o APK de depuração.' }
   }
   finally { Pop-Location }
 
+  if ($ZapChatTestApk) {
+    $apk = Join-Path $projectRoot 'android\app\build\outputs\apk\zapChatTest\app-zapChatTest.apk'
+    if (-not (Test-Path -LiteralPath $apk)) { throw 'Gradle terminou, mas app-zapChatTest.apk não foi encontrado.' }
+    $releaseDirectory = Join-Path $projectRoot 'release\android-zapchat-test-2.0.0'
+    New-Item -ItemType Directory -Path $releaseDirectory -Force | Out-Null
+    $output = Join-Path $releaseDirectory 'ZapDMR-ZapChat-Teste-Android-2.0.0.apk'
+    Copy-Item -LiteralPath $apk -Destination $output -Force
+    $hash = (Get-FileHash -LiteralPath $output -Algorithm SHA256).Hash.ToLowerInvariant()
+    [IO.File]::WriteAllText((Join-Path $releaseDirectory 'SHA256SUMS.txt'), "$hash  $(Split-Path -Leaf $output)`n", [Text.UTF8Encoding]::new($false))
+    Write-Host "APK experimental criado: $output"
+    return
+  }
   if (-not $DebugApk) {
     & (Join-Path $PSScriptRoot 'sign-android.ps1')
     return

@@ -20,6 +20,9 @@ data/settings.json
 .android/
 work/
 native/**/build-*/
+backups/
+.wrangler-dry-run-email*/
+site/cloudflare/.wrangler-dry-run-email/
 
 android/app/google-services.json
 *firebase*adminsdk*.json

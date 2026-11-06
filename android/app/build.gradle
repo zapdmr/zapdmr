@@ -46,6 +46,17 @@ android {
         }
     }
     buildTypes {
+        zapChatTest {
+            initWith release
+            applicationIdSuffix ".zapchattest"
+            versionNameSuffix "-zapchat-email-test.1"
+            matchingFallbacks = ["release"]
+            signingConfig signingConfigs.debug
+            resValue "string", "app_name", "ZapDMR — ZapChat Teste"
+            resValue "string", "title_activity_main", "ZapDMR — ZapChat Teste"
+            resValue "string", "package_name", "br.radio.zapdmr.zapchattest"
+            resValue "string", "custom_url_scheme", "br.radio.zapdmr.zapchattest"
+        }
         carPreview {
             initWith release
             applicationIdSuffix ".carpreview"
@@ -104,4 +115,8 @@ try {
 
 android.applicationVariants.all { variant ->
     if (variant.buildType.name == "carPreview") variant.outputs.all { versionCodeOverride = 15313 }
+    if (variant.buildType.name == "zapChatTest") variant.outputs.all {
+        versionCodeOverride = 20001
+        versionNameOverride = "2.0.0-zapchat-email-test.1"
+    }
 }
