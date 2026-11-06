@@ -320,5 +320,42 @@
     setInterval(refreshControls, 1000);
     button.disabled = false;
   }
+  const PIX_KEY = 'f91e394a-28b5-43ea-b561-24e0896e8871';
+  const pixKey = document.querySelector('#pixKey');
+  const copyPixKey = document.querySelector('#copyPixKey');
+  const pixCopyStatus = document.querySelector('#pixCopyStatus');
+  const pixDialog = document.querySelector('#pixDialog');
+  const pixOpen = document.querySelector('[data-pix-open]');
+  async function copyPix() {
+    if (!pixKey || !copyPixKey || !pixCopyStatus) return;
+    copyPixKey.disabled = true;
+    try {
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(PIX_KEY);
+      else {
+        const field = document.createElement('textarea');
+        field.value = PIX_KEY; field.readOnly = true; field.style.position = 'fixed'; field.style.opacity = '0';
+        document.body.append(field); field.select();
+        if (!document.execCommand('copy')) throw new Error('copy unavailable');
+        field.remove();
+      }
+      pixCopyStatus.textContent = 'Chave Pix copiada. Confira o beneficiário RIZANDRO CESAR DA SILVA no aplicativo bancário.';
+      copyPixKey.textContent = 'Chave copiada ✓';
+    } catch {
+      const range = document.createRange(); range.selectNodeContents(pixKey);
+      const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+      pixCopyStatus.textContent = 'Não foi possível copiar automaticamente. A chave foi selecionada para você copiar.';
+    } finally {
+      copyPixKey.disabled = false;
+      setTimeout(() => { copyPixKey.textContent = 'Copiar chave Pix'; }, 2400);
+    }
+  }
+  if (pixKey) pixKey.textContent = PIX_KEY;
+  if (copyPixKey) copyPixKey.addEventListener('click', () => void copyPix());
+  if (pixOpen && pixDialog) pixOpen.addEventListener('click', () => {
+    if (typeof pixDialog.showModal === 'function') pixDialog.showModal(); else pixDialog.setAttribute('open', '');
+  });
+  if (pixDialog) pixDialog.addEventListener('click', event => {
+    if (event.target === pixDialog) pixDialog.close();
+  });
   void status();
 })();
