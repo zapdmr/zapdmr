@@ -4,7 +4,7 @@ import {chatPush,pushConfigured} from './chat-push.mjs';
 import {sessionService} from './auth-sessions.mjs';
 import {chatInbox} from './chat-inbox.mjs';
 import {zapchatActivation} from './zapchat-activation.mjs';
-import {emailActivation,normalizeEmail} from './email-activation.mjs';
+import {emailActivation,normalizeEmail,sendZapchatEmailCode} from './email-activation.mjs';
 // GPL-3.0-only. Cloudflare Workers + D1 API; no Node compatibility flag required.
 // Route handling, CORS, security headers, static assets and scheduled cleanup
 // are composed by the Worker entry point. No credentials are generated here.
@@ -185,7 +185,7 @@ export async function handleApi(request,env,url=new URL(request.url)){
 async function api(request,env,url,config){
   const route=url.pathname,method=request.method,db=config.db;
   const activation=onboarding(config,{hash,seal,unseal,failure,publicUser,sessions:()=>sessionService(config,{hash,seal,unseal,randomToken,failure})});
-  const chatActivation=zapchatActivation(config,{env,hash,sameHash,seal,unseal,failure,rate,otpCode,randomToken,verificationMode,isOfficialPhoneHash,officialConfirmationUnavailable,reverseConfigured,deliverCode,otpMessage,challengeView,phoneVariants});
+  const chatActivation=zapchatActivation(config,{env,hash,sameHash,seal,unseal,failure,rate,otpCode,randomToken,verificationMode,isOfficialPhoneHash,officialConfirmationUnavailable,reverseConfigured,deliverCode,sendZapchatEmailCode,otpMessage,challengeView,phoneVariants});
   const email=emailActivation(config,env,{failure,hash,sameHash,seal,unseal,randomToken,otpCode,rate,sessionService,publicUser,downloadToken});
   if(route==='/v1/auth/activate'&&method==='POST'){await rate(config,request,'app-activate',10,600000);const raw=await body(request);return json(200,await activation.redeem(raw.code));}
   const noticeResponse=await releaseNotices.handleApi(request,env,url,config);if(noticeResponse)return noticeResponse;

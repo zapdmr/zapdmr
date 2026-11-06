@@ -70,6 +70,11 @@ async function sendCode(env, row, email, code, request, failure) {
   }
 }
 
+export async function sendZapchatEmailCode(env, row, email, code, request, failure) {
+  await sendCode(env, row, email, code, request, failure);
+  return maskedEmail(email);
+}
+
 function callsignLabel(value) {
   return String(value || '').replace(/[^A-Z0-9]/g, '').slice(0, 8);
 }

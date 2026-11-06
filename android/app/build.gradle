@@ -70,7 +70,7 @@ android {
         zapChatTest {
             initWith release
             applicationIdSuffix ".zapchattest"
-            versionNameSuffix "-zapchat-email-test.6"
+            versionNameSuffix "-zapchat-email-test.7"
             matchingFallbacks = ["release"]
             signingConfig signingConfigs.debug
             buildConfigField "boolean", "ZAPCHAT_TEST_BUILD", "true"
@@ -139,7 +139,7 @@ try {
 android.applicationVariants.all { variant ->
     if (variant.buildType.name == "carPreview") variant.outputs.all { versionCodeOverride = 15313 }
     if (variant.buildType.name == "zapChatTest") variant.outputs.all {
-        versionCodeOverride = 20006
-        versionNameOverride = "2.0.0-zapchat-email-test.6"
+        versionCodeOverride = 20007
+        versionNameOverride = "2.0.0-zapchat-email-test.7"
     }
 }

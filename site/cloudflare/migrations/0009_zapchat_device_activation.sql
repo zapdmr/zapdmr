@@ -14,7 +14,8 @@ CREATE INDEX IF NOT EXISTS zapchat_authorizations_user ON zapchat_device_authori
 CREATE TABLE IF NOT EXISTS zapchat_activation_codes (
  device_id TEXT PRIMARY KEY REFERENCES auth_devices(id) ON DELETE CASCADE,
  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
- registration_id TEXT NOT NULL REFERENCES registrations(id) ON DELETE CASCADE,
+ registration_id TEXT NOT NULL,
+ channel TEXT NOT NULL DEFAULT 'whatsapp' CHECK(channel IN('whatsapp','email')),
  platform TEXT NOT NULL CHECK(platform IN('android','windows')),
  hash TEXT NOT NULL,
  expires_at INTEGER NOT NULL,
