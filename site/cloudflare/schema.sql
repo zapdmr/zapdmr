@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS email_registrations (
   dmr_id TEXT NOT NULL,
   email_cipher TEXT NOT NULL,
   email_hash TEXT NOT NULL,
+  authorized_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
   platform TEXT NOT NULL CHECK(platform IN('android','windows')),
   created_at INTEGER NOT NULL,
   verified_at INTEGER,
@@ -76,6 +77,7 @@ CREATE TABLE IF NOT EXISTS email_registrations (
 );
 CREATE INDEX IF NOT EXISTS email_registrations_retention ON email_registrations(created_at);
 CREATE INDEX IF NOT EXISTS email_registrations_identity ON email_registrations(callsign,email_hash);
+CREATE INDEX IF NOT EXISTS email_registrations_authorized_user ON email_registrations(authorized_user_id);
 CREATE TABLE IF NOT EXISTS email_codes (
   registration_id TEXT PRIMARY KEY REFERENCES email_registrations(id) ON DELETE CASCADE,
   hash TEXT NOT NULL,

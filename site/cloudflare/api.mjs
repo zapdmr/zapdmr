@@ -16,7 +16,7 @@ const releaseNotices=createReleaseNotifications({failure,json,body,rate,hash,sam
 
 function failure(status,message,details={}){return Object.assign(new Error(message),{status,...details});}
 function json(status,value,headers={}){return new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...headers}});}
-function errorResponse(error){return json(error.status||500,{message:error.status?error.message:'Não foi possível concluir o pedido. Tente novamente.',...(/^(SESSION_[A-Z_]+|APP_UPDATE_REQUIRED)$/.test(error.code||'')?{code:error.code}:{}),...(Number.isInteger(error.retryAfterSeconds)?{retryAfterSeconds:error.retryAfterSeconds}:{})});}
+function errorResponse(error){return json(error.status||500,{message:error.status?error.message:'Não foi possível concluir o pedido. Tente novamente.',...(/^(SESSION_[A-Z_]+|APP_UPDATE_REQUIRED|ACCOUNT_RECOVERY_REQUIRED)$/.test(error.code||'')?{code:error.code}:{}),...(Number.isInteger(error.retryAfterSeconds)?{retryAfterSeconds:error.retryAfterSeconds}:{})});}
 function hex(bytes){return Array.from(new Uint8Array(bytes),byte=>byte.toString(16).padStart(2,'0')).join('');}
 function unhex(value){return Uint8Array.from(value.match(/../g),part=>parseInt(part,16));}
 function base64(bytes){let text='';for(const byte of new Uint8Array(bytes))text+=String.fromCharCode(byte);return btoa(text);}
@@ -88,6 +88,10 @@ async function currentUser(config,request){
   if(!/^[A-Za-z0-9_-]{43}$/.test(token))throw failure(401,'Entre na comunidade com o código recebido no seu número.',{code:'SESSION_INVALID'});
   const row=await config.db.prepare('SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN session_devices d ON d.session_hash=s.hash LEFT JOIN auth_devices a ON a.id=d.device_id WHERE s.hash=? AND s.expires_at>? AND u.whatsapp_verified=1 AND (d.device_id IS NULL OR a.revoked_at IS NULL AND a.refresh_expires_at>?)').bind(await hash(config,token),Date.now(),Date.now()).first();
   if(!row)throw failure(401,'Sessão expirada ou revogada.',{code:'SESSION_EXPIRED'});return row;
+}
+async function optionalCurrentUser(config,request){
+  if(!request.headers.get('Authorization'))return null;
+  return currentUser(config,request);
 }
 async function publicUser(config,row,own=false){const emailVerified=Boolean(row.email_verified),byEmail=row.verification_method==='email';return {id:row.id,callsign:row.callsign,dmrId:row.dmr_id,displayName:row.display_name||row.callsign,verified:Boolean(row.whatsapp_verified||emailVerified),whatsapp_verified:Boolean(row.whatsapp_verified&&!byEmail),email_verified:emailVerified,verificationMethod:row.verification_method,sharePhone:Boolean(row.share_phone&&!byEmail),...(own?await releaseNotices.preference(config,row.id):{}),...(!byEmail&&(own||row.share_phone)?{whatsapp:await unseal(config,row.phone_cipher)}:{})};}
 async function publicMessage(config,row,own){return {id:row.id,from:row.sender,to:row.recipient,text:await unseal(config,row.body_cipher),at:row.at,readAt:row.read_at,deliveredAt:row.delivered_at||row.read_at||null,direction:row.sender===own?'out':'in',state:row.read_at?'read':'sent',...(row.attachment_id?{attachment:{id:row.attachment_id,name:await unseal(config,row.attachment_name),size:row.attachment_size,mime:row.attachment_mime,kind:row.attachment_mime.startsWith('image/')?'image':'document'}}:{})};}
@@ -238,7 +242,7 @@ async function api(request,env,url,config){
   }
   if(route==='/v1/email/registrations'&&method==='POST'){
     await rate(config,request,'email-registration',10,3600000);
-    return json(201,await email.register(request,await body(request),normalizeCallsign,normalizeRadioId,NOTICE_VERSION));
+    return json(201,await email.register(request,await body(request),normalizeCallsign,normalizeRadioId,NOTICE_VERSION,await optionalCurrentUser(config,request)));
   }
   if(route==='/v1/email/request-code'&&method==='POST'){
     await rate(config,request,'email-otp',5,600000);

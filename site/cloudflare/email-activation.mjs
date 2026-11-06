@@ -79,10 +79,22 @@ export function emailActivation(config, env, helpers) {
   const db = config.db;
 
   async function assertIdentity(row) {
-    const prior = await db.prepare('SELECT * FROM users WHERE callsign=? OR dmr_id=? LIMIT 1').bind(row.callsign, row.dmr_id).first();
+    const [prior, conflictingIdentity, emailOwner] = await Promise.all([
+      db.prepare('SELECT * FROM users WHERE callsign=? AND dmr_id=? LIMIT 1').bind(row.callsign, row.dmr_id).first(),
+      db.prepare('SELECT id FROM users WHERE (callsign=? OR dmr_id=?) AND NOT (callsign=? AND dmr_id=?) LIMIT 1').bind(row.callsign, row.dmr_id, row.callsign, row.dmr_id).first(),
+      db.prepare('SELECT id FROM users WHERE email_hash=? LIMIT 1').bind(row.email_hash).first()
+    ]);
+    if (conflictingIdentity || emailOwner && emailOwner.id !== prior?.id) {
+      throw failure(409, 'Não foi possível verificar a titularidade. Solicite recuperação ao responsável.', {code: 'ACCOUNT_RECOVERY_REQUIRED'});
+    }
     if (!prior) return null;
-    if (prior.callsign !== row.callsign || prior.dmr_id !== row.dmr_id || !prior.email_hash || prior.email_hash !== row.email_hash) {
-      throw failure(409, 'Este indicativo já possui uma conta. Use o e-mail já vinculado ou solicite recuperação ao responsável.');
+    const trustedEmail = prior.email_verified === 1 && prior.email_hash === row.email_hash;
+    const trustedSession = Boolean(row.authorized_user_id && row.authorized_user_id === prior.id);
+    if (!trustedEmail && !trustedSession) {
+      const message = prior.email_verified === 1
+        ? 'Sua conta já existe. Confirme usando o e-mail já vinculado. Se não tiver acesso, solicite recuperação ao responsável.'
+        : 'Sua conta já existe, mas ainda não possui e-mail confirmado. Importe a ativação antiga neste aparelho e tente novamente. Se não tiver acesso, solicite recuperação ao responsável.';
+      throw failure(409, message, {code: 'ACCOUNT_RECOVERY_REQUIRED'});
     }
     return prior;
   }
@@ -109,7 +121,7 @@ export function emailActivation(config, env, helpers) {
     }
   }
 
-  async function register(request, raw, normalizeCallsign, normalizeRadioId, noticeVersion) {
+  async function register(request, raw, normalizeCallsign, normalizeRadioId, noticeVersion, authorizedUser = null) {
     if (raw.noticeAccepted !== true) throw failure(400, 'Leia e aceite a utilização dos dados para o cadastro.');
     const callsign = normalizeCallsign(raw.callsign);
     const dmrId = normalizeRadioId(raw.dmrId);
@@ -117,12 +129,24 @@ export function emailActivation(config, env, helpers) {
     const emailHash = await hash(config, 'email:' + email);
     const platform = raw.platform === 'windows' ? 'windows' : 'android';
     const registrationId = crypto.randomUUID();
-    const existing = await db.prepare('SELECT * FROM users WHERE callsign=? OR dmr_id=? OR email_hash=? LIMIT 1').bind(callsign, dmrId, emailHash).first();
-    if (existing && (existing.callsign !== callsign || existing.dmr_id !== dmrId || !existing.email_hash || existing.email_hash !== emailHash)) {
-      throw failure(409, 'Os dados informados pertencem a outra conta. Solicite recuperação ao responsável.');
+    const [existing, conflictingIdentity, emailOwner] = await Promise.all([
+      db.prepare('SELECT * FROM users WHERE callsign=? AND dmr_id=? LIMIT 1').bind(callsign, dmrId).first(),
+      db.prepare('SELECT id FROM users WHERE (callsign=? OR dmr_id=?) AND NOT (callsign=? AND dmr_id=?) LIMIT 1').bind(callsign, dmrId, callsign, dmrId).first(),
+      db.prepare('SELECT id FROM users WHERE email_hash=? LIMIT 1').bind(emailHash).first()
+    ]);
+    if (conflictingIdentity || emailOwner && emailOwner.id !== existing?.id || authorizedUser && authorizedUser.id !== existing?.id) {
+      throw failure(409, 'Não foi possível verificar a titularidade. Solicite recuperação ao responsável.', {code: 'ACCOUNT_RECOVERY_REQUIRED'});
     }
-    await db.prepare('INSERT INTO email_registrations(id,callsign,dmr_id,email_cipher,email_hash,platform,created_at,notice_version) VALUES(?,?,?,?,?,?,?,?)')
-      .bind(registrationId, callsign, dmrId, await seal(config, email), emailHash, platform, Date.now(), noticeVersion).run();
+    const trustedEmail = existing?.email_verified === 1 && existing.email_hash === emailHash;
+    const trustedSession = Boolean(existing && authorizedUser?.id === existing.id);
+    if (existing && !trustedEmail && !trustedSession) {
+      const message = existing.email_verified === 1
+        ? 'Sua conta já existe. Confirme usando o e-mail já vinculado. Se não tiver acesso, solicite recuperação ao responsável.'
+        : 'Sua conta já existe, mas ainda não possui e-mail confirmado. Importe a ativação antiga neste aparelho e tente novamente. Se não tiver acesso, solicite recuperação ao responsável.';
+      throw failure(409, message, {code: 'ACCOUNT_RECOVERY_REQUIRED'});
+    }
+    await db.prepare('INSERT INTO email_registrations(id,callsign,dmr_id,email_cipher,email_hash,authorized_user_id,platform,created_at,notice_version) VALUES(?,?,?,?,?,?,?,?,?)')
+      .bind(registrationId, callsign, dmrId, await seal(config, email), emailHash, trustedSession ? existing.id : null, platform, Date.now(), noticeVersion).run();
     const row = await db.prepare('SELECT * FROM email_registrations WHERE id=?').bind(registrationId).first();
     let challenge;
     if (raw.requestVerification === true) challenge = await issue(request, row);
@@ -157,15 +181,23 @@ export function emailActivation(config, env, helpers) {
     const device = modern ? await sessions.prepare(id, token) : null;
     const placeholderPhoneCipher = existing?.phone_cipher || await seal(config, '');
     const placeholderPhoneHash = existing?.phone_hash || await hash(config, 'email-account:' + row.email_hash);
-    let result;
-    try {
-      result = await db.batch([
-        db.prepare(`INSERT INTO users(id,callsign,dmr_id,phone_cipher,phone_hash,share_phone,created_at,verified_at,whatsapp_verified,verification_method,email_cipher,email_hash,email_verified)
+    const accountStatement = existing
+      ? db.prepare(`UPDATE users SET verified_at=?,verification_method='email',email_cipher=?,email_hash=?,email_verified=1
+          WHERE id=? AND callsign=? AND dmr_id=? AND EXISTS(
+            SELECT 1 FROM email_registrations r JOIN email_codes c ON c.registration_id=r.id
+            WHERE r.id=? AND c.hash=? AND c.expires_at>? AND c.attempts<=5
+              AND (r.authorized_user_id=users.id OR users.email_verified=1 AND users.email_hash=r.email_hash)) RETURNING *`)
+          .bind(now, row.email_cipher, row.email_hash, existing.id, row.callsign, row.dmr_id, row.id, codeRow.hash, now)
+      : db.prepare(`INSERT INTO users(id,callsign,dmr_id,phone_cipher,phone_hash,share_phone,created_at,verified_at,whatsapp_verified,verification_method,email_cipher,email_hash,email_verified)
           SELECT ?,r.callsign,r.dmr_id,?,?,0,?,?,1,'email',r.email_cipher,r.email_hash,1 FROM email_registrations r JOIN email_codes c ON c.registration_id=r.id
           WHERE r.id=? AND c.hash=? AND c.expires_at>? AND c.attempts<=5
           ON CONFLICT(callsign) DO UPDATE SET verified_at=excluded.verified_at,verification_method='email',email_cipher=excluded.email_cipher,email_hash=excluded.email_hash,email_verified=1
           WHERE users.dmr_id=excluded.dmr_id AND users.email_hash=excluded.email_hash RETURNING *`)
-          .bind(id, placeholderPhoneCipher, placeholderPhoneHash, now, now, row.id, codeRow.hash, now),
+          .bind(id, placeholderPhoneCipher, placeholderPhoneHash, now, now, row.id, codeRow.hash, now);
+    let result;
+    try {
+      result = await db.batch([
+        accountStatement,
         db.prepare(`INSERT INTO sessions(hash,user_id,expires_at) SELECT ?,u.id,? FROM users u JOIN email_registrations r ON u.callsign=r.callsign AND u.dmr_id=r.dmr_id AND u.email_hash=r.email_hash
           JOIN email_codes c ON c.registration_id=r.id WHERE r.id=? AND c.hash=? AND c.expires_at>? AND c.attempts<=5`)
           .bind(sessionHash, modern ? device.value.accessExpiresAt : now + 30 * 86400000, row.id, codeRow.hash, now),
