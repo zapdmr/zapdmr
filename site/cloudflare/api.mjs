@@ -241,8 +241,9 @@ async function api(request,env,url,config){
     return json(200,{registrations:rows[0].results,verifiedUsers:rows[1].results[0].n});
   }
   if(route==='/v1/email/registrations'&&method==='POST'){
-    await rate(config,request,'email-registration',10,3600000);
-    return json(201,await email.register(request,await body(request),normalizeCallsign,normalizeRadioId,NOTICE_VERSION,await optionalCurrentUser(config,request)));
+    const raw=await body(request),authorizedUser=await optionalCurrentUser(config,request);
+    await rate(config,request,authorizedUser?'email-registration-account':'email-registration',10,3600000,authorizedUser?.id);
+    return json(201,await email.register(request,raw,normalizeCallsign,normalizeRadioId,NOTICE_VERSION,authorizedUser));
   }
   if(route==='/v1/email/request-code'&&method==='POST'){
     await rate(config,request,'email-otp',5,600000);
