@@ -23,7 +23,8 @@
       "/*",
       "!/site.js",
       "!/site.css",
-      "!/ZapDMR.png"
+      "!/ZapDMR.png",
+      "!/pix-zapdmr-qrcode.png"
     ],
     "html_handling": "none",
     "not_found_handling": "none"

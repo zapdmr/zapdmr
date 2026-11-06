@@ -7,6 +7,7 @@ const root = path.resolve(__dirname, '../..');
 const html = fs.readFileSync(path.join(root, 'site/public/index.html'), 'utf8');
 const js = fs.readFileSync(path.join(root, 'site/public/site.js'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'site/public/site.css'), 'utf8');
+const workerConfig = fs.readFileSync(path.join(root, 'site/cloudflare/wrangler.jsonc'), 'utf8');
 const qr = fs.readFileSync(path.join(root, 'site/public/pix-zapdmr-qrcode.png'));
 const key = 'f91e394a-28b5-43ea-b561-24e0896e8871';
 
@@ -23,6 +24,7 @@ assert.match(js, /navigator\.clipboard\?\.writeText\) await navigator\.clipboard
 assert.doesNotMatch(js, /URLSearchParams[^;]*pix/i);
 assert.match(css, /\.support-section\{/);
 assert.match(css, /@media\(max-width:640px\)[^{]*\{\.support-section/);
+assert.match(workerConfig, /"!\/pix-zapdmr-qrcode\.png"/);
 assert.equal(crypto.createHash('sha256').update(qr).digest('hex'), '142f98bff1c172b3a052751c59fb31645015c6f9189ea2ab9b704de12cd57d60');
 
 console.log('PASS: the local Pix section is voluntary, static, responsive, copy-enabled, and pinned to the validated QR asset.');
