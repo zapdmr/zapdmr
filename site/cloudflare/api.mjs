@@ -4,6 +4,7 @@ import {chatPush,pushConfigured} from './chat-push.mjs';
 import {sessionService} from './auth-sessions.mjs';
 import {chatInbox} from './chat-inbox.mjs';
 import {zapchatActivation} from './zapchat-activation.mjs';
+import {emailActivation,normalizeEmail} from './email-activation.mjs';
 // GPL-3.0-only. Cloudflare Workers + D1 API; no Node compatibility flag required.
 // Route handling, CORS, security headers, static assets and scheduled cleanup
 // are composed by the Worker entry point. No credentials are generated here.
@@ -16,7 +17,7 @@ const releaseNotices=createReleaseNotifications({failure,json,body,rate,hash,sam
 
 function failure(status,message,details={}){return Object.assign(new Error(message),{status,...details});}
 function json(status,value,headers={}){return new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...headers}});}
-function errorResponse(error){return json(error.status||500,{message:error.status?error.message:'Não foi possível concluir o pedido. Tente novamente.',...(/^(SESSION_[A-Z_]+|APP_UPDATE_REQUIRED|ZAPCHAT_ACTIVATION_REQUIRED)$/.test(error.code||'')?{code:error.code}:{}),...(Number.isInteger(error.retryAfterSeconds)?{retryAfterSeconds:error.retryAfterSeconds}:{})});}
+function errorResponse(error){return json(error.status||500,{message:error.status?error.message:'Não foi possível concluir o pedido. Tente novamente.',...(/^(SESSION_[A-Z_]+|APP_UPDATE_REQUIRED|ZAPCHAT_ACTIVATION_REQUIRED|ACCOUNT_RECOVERY_REQUIRED)$/.test(error.code||'')?{code:error.code}:{}),...(Number.isInteger(error.retryAfterSeconds)?{retryAfterSeconds:error.retryAfterSeconds}:{})});}
 function hex(bytes){return Array.from(new Uint8Array(bytes),byte=>byte.toString(16).padStart(2,'0')).join('');}
 function unhex(value){return Uint8Array.from(value.match(/../g),part=>parseInt(part,16));}
 function base64(bytes){let text='';for(const byte of new Uint8Array(bytes))text+=String.fromCharCode(byte);return btoa(text);}
@@ -89,14 +90,18 @@ async function currentUser(config,request){
   const now=Date.now(),row=await config.db.prepare('SELECT u.*,a.id AS session_device_id,a.last_seen_at AS session_last_seen FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN session_devices d ON d.session_hash=s.hash LEFT JOIN auth_devices a ON a.id=d.device_id WHERE s.hash=? AND s.expires_at>? AND u.whatsapp_verified=1 AND (d.device_id IS NULL OR a.revoked_at IS NULL AND a.refresh_expires_at>?)').bind(await hash(config,token),now,now).first();
   if(!row)throw failure(401,'Sessão expirada ou revogada.',{code:'SESSION_EXPIRED'});if(row.session_device_id&&Number(row.session_last_seen)<now-60000)await config.db.prepare('UPDATE auth_devices SET last_seen_at=? WHERE id=? AND revoked_at IS NULL').bind(now,row.session_device_id).run();return row;
 }
-async function publicUser(config,row,own=false){const now=Date.now(),state=await config.db.prepare('SELECT p.version AS photo_version,(SELECT MAX(last_seen_at) FROM auth_devices WHERE user_id=? AND revoked_at IS NULL AND refresh_expires_at>?) AS presence_at FROM users u LEFT JOIN profile_photos p ON p.user_id=u.id WHERE u.id=?').bind(row.id,now,row.id).first();return {id:row.id,callsign:row.callsign,dmrId:row.dmr_id,displayName:row.display_name||row.callsign,verified:Boolean(row.whatsapp_verified),whatsapp_verified:Boolean(row.whatsapp_verified),verificationMethod:row.verification_method,sharePhone:Boolean(row.share_phone),online:Number(state?.presence_at)>now-120000,...(state?.photo_version?{photoVersion:Number(state.photo_version),photoUrl:`/v1/users/${row.id}/photo?v=${state.photo_version}`} :{}),...(own?await releaseNotices.preference(config,row.id):{}),...(own||row.share_phone?{whatsapp:await unseal(config,row.phone_cipher)}:{})};}
+async function optionalCurrentUser(config,request){
+  if(!request.headers.get('Authorization'))return null;
+  return currentUser(config,request);
+}
+async function publicUser(config,row,own=false){const now=Date.now(),emailVerified=Boolean(row.email_verified),byEmail=row.verification_method==='email',state=await config.db.prepare('SELECT p.version AS photo_version,(SELECT MAX(last_seen_at) FROM auth_devices WHERE user_id=? AND revoked_at IS NULL AND refresh_expires_at>?) AS presence_at FROM users u LEFT JOIN profile_photos p ON p.user_id=u.id WHERE u.id=?').bind(row.id,now,row.id).first();return {id:row.id,callsign:row.callsign,dmrId:row.dmr_id,displayName:row.display_name||row.callsign,verified:Boolean(row.whatsapp_verified||emailVerified),whatsapp_verified:Boolean(row.whatsapp_verified&&!byEmail),email_verified:emailVerified,verificationMethod:row.verification_method,sharePhone:Boolean(row.share_phone&&!byEmail),online:Number(state?.presence_at)>now-120000,...(state?.photo_version?{photoVersion:Number(state.photo_version),photoUrl:`/v1/users/${row.id}/photo?v=${state.photo_version}`} :{}),...(own?await releaseNotices.preference(config,row.id):{}),...(!byEmail&&(own||row.share_phone)?{whatsapp:await unseal(config,row.phone_cipher)}:{})};}
 async function publicMessage(config,row,own){return {id:row.id,from:row.sender,to:row.recipient,text:await unseal(config,row.body_cipher),at:row.at,readAt:row.read_at,deliveredAt:row.delivered_at||row.read_at||null,direction:row.sender===own?'out':'in',state:row.read_at?'read':'sent',...(row.attachment_id?{attachment:{id:row.attachment_id,name:await unseal(config,row.attachment_name),size:row.attachment_size,mime:row.attachment_mime,kind:row.attachment_mime.startsWith('image/')?'image':row.attachment_mime.startsWith('video/')?'video':row.attachment_mime.startsWith('audio/')?'audio':'document'}}:{})};}
 function downloadMetadata(env,config,platform){
   if(!config.downloads[platform])return {available:false};
   const prefix=platform==='android'?'DOWNLOAD_ANDROID':'DOWNLOAD_WINDOWS',bytes=Number(env[prefix+'_BYTES']),sha256=env[prefix+'_SHA256'];
   return {available:true,...(Number.isSafeInteger(bytes)&&bytes>0?{bytes}:{}),...(/^[a-f\d]{64}$/i.test(sha256||'')?{sha256:sha256.toLowerCase()}:{})};
 }
-async function downloadToken(config,id,platform){const value=base64url(encoder.encode(JSON.stringify({id,platform,expires:Date.now()+900000}))),signature=base64url(await crypto.subtle.sign('HMAC',config.downloadHmac,encoder.encode(value)));return value+'.'+signature;}
+async function downloadToken(config,id,platform,channel='whatsapp'){const value=base64url(encoder.encode(JSON.stringify({id,platform,channel,expires:Date.now()+900000}))),signature=base64url(await crypto.subtle.sign('HMAC',config.downloadHmac,encoder.encode(value)));return value+'.'+signature;}
 async function pairAvailable(config,own,peer){return config.db.prepare('SELECT u.id FROM users u WHERE u.id=? AND u.whatsapp_verified=1 AND NOT EXISTS(SELECT 1 FROM blocks b WHERE (b.owner=? AND b.peer=u.id) OR (b.owner=u.id AND b.peer=?))').bind(peer,own,own).first();}
 const messageSelect=`SELECT m.*,a.id AS attachment_id,a.name_cipher AS attachment_name,a.size AS attachment_size,a.mime AS attachment_mime FROM messages m LEFT JOIN message_attachments ma ON ma.message_id=m.id LEFT JOIN attachments a ON a.id=ma.attachment_id`;
 async function messageBatch(config,own,peer,after,receiptAfter,includeReceipts,before=0){
@@ -142,7 +147,7 @@ async function challengeView(config,env,codeRow,plain){
     const status=job?.status||'queued';
     result.deliveryStatus=status;result.sent=['sent','delivered'].includes(status);result.delivered=status==='delivered';result.queued=['queued','sending'].includes(status);
     if(result.delivered)result.message='O WhatsApp confirmou o recebimento do código. Digite os seis dígitos recebidos na mensagem.';
-    else if(status==='sent')result.message='Código encaminhado ao WhatsApp; a entrega no telefone ainda não foi confirmada. Se não chegar, use Reenviar código após o contador.';
+    else if(status==='sent')result.message='Código encaminhado ao WhatsApp; a entrega no telefone ainda não foi confirmada. Se não chegar em até 90 segundos, ofereceremos a confirmação segura pelo seu próprio WhatsApp.';
     else if(status==='failed'||status==='sending'&&job.attempts>=2&&job.lease_until<now){
       const official=await isOfficialPhoneHash(config,env,job?.phone_hash);
       result.message=official?'Não foi possível confirmar a entrega ao WhatsApp do número oficial. Use Reenviar código após o contador e confira as mensagens no aparelho principal. A confirmação reversa para o próprio número não está disponível.':'Não foi possível confirmar o envio do código. Use Reenviar código após o contador.';
@@ -181,9 +186,10 @@ async function api(request,env,url,config){
   const route=url.pathname,method=request.method,db=config.db;
   const activation=onboarding(config,{hash,seal,unseal,failure,publicUser,sessions:()=>sessionService(config,{hash,seal,unseal,randomToken,failure})});
   const chatActivation=zapchatActivation(config,{env,hash,sameHash,seal,unseal,failure,rate,otpCode,randomToken,verificationMode,isOfficialPhoneHash,officialConfirmationUnavailable,reverseConfigured,deliverCode,otpMessage,challengeView,phoneVariants});
+  const email=emailActivation(config,env,{failure,hash,sameHash,seal,unseal,randomToken,otpCode,rate,sessionService,publicUser,downloadToken});
   if(route==='/v1/auth/activate'&&method==='POST'){await rate(config,request,'app-activate',10,600000);const raw=await body(request);return json(200,await activation.redeem(raw.code));}
   const noticeResponse=await releaseNotices.handleApi(request,env,url,config);if(noticeResponse)return noticeResponse;
-  if(route==='/v1/status'&&method==='GET'){const mode=await verificationMode(config,env);return json(200,{version:'1.5.2',chatAttachments:true,maxAttachmentBytes:15728640,registration:true,verificationConfigured:mode!=='unavailable',verificationMode:mode,developmentMode:false,bridgeConnected:await bridgeConnected(config,env),downloadRequiresVerification:true,owner:env.OWNER_NAME,privacyEmail:env.PRIVACY_EMAIL,downloads:{android:downloadMetadata(env,config,'android'),windows:downloadMetadata(env,config,'windows')}});}
+  if(route==='/v1/status'&&method==='GET'){const mode=await verificationMode(config,env);return json(200,{version:'1.5.2',chatAttachments:true,maxAttachmentBytes:15728640,registration:true,verificationConfigured:mode!=='unavailable',verificationMode:mode,emailVerificationConfigured:Boolean(env.BREVO_API_KEY&&env.BREVO_SENDER_EMAIL),developmentMode:false,bridgeConnected:await bridgeConnected(config,env),downloadRequiresVerification:true,owner:env.OWNER_NAME,privacyEmail:env.PRIVACY_EMAIL,downloads:{android:downloadMetadata(env,config,'android'),windows:downloadMetadata(env,config,'windows')}});}
   if(route.startsWith('/v1/whatsapp/')&&method==='POST'){
     await bridgeAuth(config,env,request);await rate(config,request,'whatsapp-bridge',120);const raw=await body(request),now=Date.now();
     if(route==='/v1/whatsapp/webhook'){
@@ -231,6 +237,30 @@ async function api(request,env,url,config){
     if(method==='POST'){const origin=request.headers.get('Origin');if(origin!==config.origin&&origin!==url.origin)throw failure(403,'Origem administrativa inválida.');if(Number(request.headers.get('Content-Length'))>20000)throw failure(413,'Formulário grande demais.');const isJson=(request.headers.get('Content-Type')||'').includes('application/json');const raw=isJson?await body(request):Object.fromEntries(new URLSearchParams((await request.text()).slice(0,20000)));const result=raw.action==='unpublish'?await releases.unpublish(raw.versionCode):await releases.publish(raw);return isJson?json(200,result):new Response(null,{status:303,headers:{Location:'/admin/releases'}});}
     return json(405,{message:'Método não permitido.'});
   }
+  if(route==='/admin/email-recovery'){
+    if(method!=='POST')return json(405,{message:'Método não permitido.'},{Allow:'POST'});
+    await rate(config,request,'admin-email-recovery',10,3600000);let credentials='';
+    try{const header=request.headers.get('Authorization')||'';if(header.startsWith('Basic '))credentials=decoder.decode(unbase64(header.slice(6)));}catch{}
+    if(!await sameHash(config,credentials,await hash(config,'admin:'+env.ADMIN_PASSWORD)))return json(401,{message:'Autenticação administrativa necessária.'},{'WWW-Authenticate':'Basic realm="ZapDMR"'});
+    const origin=request.headers.get('Origin');if(origin&&origin!==config.origin&&origin!==url.origin)throw failure(403,'Origem administrativa inválida.');
+    const raw=await body(request),callsign=normalizeCallsign(raw.callsign),dmrId=normalizeRadioId(raw.dmrId),email=normalizeEmail(raw.email);
+    if(raw.confirmIdentity!==callsign+':'+dmrId)throw failure(400,'Confirmação administrativa da identidade inválida.');
+    const reason=String(raw.reason||'').trim();if(reason.length<8||reason.length>200)throw failure(400,'Informe um motivo administrativo entre 8 e 200 caracteres.');
+    const emailHash=await hash(config,'email:'+email);
+    const [account,emailOwner]=await Promise.all([
+      db.prepare('SELECT * FROM users WHERE callsign=? AND dmr_id=? LIMIT 1').bind(callsign,dmrId).first(),
+      db.prepare('SELECT id FROM users WHERE email_hash=? LIMIT 1').bind(emailHash).first()
+    ]);
+    if(!account)throw failure(404,'Conta não encontrada para os dados confirmados.');
+    if(emailOwner&&emailOwner.id!==account.id)throw failure(409,'O e-mail já está vinculado a outra conta.');
+    const now=Date.now(),auditId=crypto.randomUUID(),emailCipher=await seal(config,email);
+    const result=await db.batch([
+      db.prepare('UPDATE users SET email_cipher=?,email_hash=?,email_verified=1 WHERE id=? AND callsign=? AND dmr_id=?').bind(emailCipher,emailHash,account.id,callsign,dmrId),
+      db.prepare('INSERT INTO email_recovery_audit(id,user_id,action,email_hash,reason,created_at) VALUES(?,?,?,?,?,?)').bind(auditId,account.id,'admin_bind_verified',emailHash,reason,now)
+    ]);
+    if(!result[0].meta.changes)throw failure(409,'A conta mudou durante a recuperação. Tente novamente após conferir os dados.');
+    return json(200,{ok:true,auditId,user:{callsign:account.callsign,dmrId:account.dmr_id,emailVerified:true},message:'E-mail confirmado administrativamente. O próximo acesso ainda exigirá o código de seis dígitos enviado ao endereço vinculado.'});
+  }
   if(route==='/admin'||route==='/admin/'){
     if(method!=='GET')return json(405,{message:'Método não permitido.'},{Allow:'GET'});
     await rate(config,request,'admin',10);let credentials='';
@@ -239,6 +269,19 @@ async function api(request,env,url,config){
     if(!await sameHash(config,credentials,expected))return json(401,{message:'Autenticação administrativa necessária.'},{'WWW-Authenticate':'Basic realm="ZapDMR"'});
     const rows=await db.batch([db.prepare('SELECT callsign,dmr_id,platform,created_at FROM registrations ORDER BY created_at DESC LIMIT 200'),db.prepare('SELECT count(*) AS n FROM users')]);
     return json(200,{registrations:rows[0].results,verifiedUsers:rows[1].results[0].n});
+  }
+  if(route==='/v1/email/registrations'&&method==='POST'){
+    const raw=await body(request),authorizedUser=await optionalCurrentUser(config,request);
+    await rate(config,request,authorizedUser?'email-registration-account':'email-registration',10,3600000,authorizedUser?.id);
+    return json(201,await email.register(request,raw,normalizeCallsign,normalizeRadioId,NOTICE_VERSION,authorizedUser));
+  }
+  if(route==='/v1/email/request-code'&&method==='POST'){
+    await rate(config,request,'email-otp',5,600000);
+    return json(200,await email.requestCode(request,await body(request)));
+  }
+  if(route==='/v1/email/verify'&&method==='POST'){
+    await rate(config,request,'email-verify',20,600000);
+    return json(200,await email.verify(await body(request)));
   }
   if(route==='/v1/registrations'&&method==='POST'){
     await rate(config,request,'registration',10,3600000);const raw=await body(request);
@@ -262,7 +305,9 @@ async function api(request,env,url,config){
     if(!row||row.expires_at<=Date.now()||row.attempts>=5)return json(200,{status:'expired',expiresInSeconds:0,retryAfterSeconds:0});
     if(row.mode==='bridge'&&Date.now()>row.requested_at+90000&&reverseConfigured(env)&&!await isOfficialPhoneHash(config,env,row.phone_hash)){
       const job=await db.prepare('SELECT status,attempts,lease_until FROM whatsapp_outbox WHERE registration_id=? AND code_hash=?').bind(row.registration_id,row.hash).first();
-      if(!['sent','delivered'].includes(job?.status)&&(!await bridgeConnected(config,env)||job?.attempts>=2&&job.lease_until<Date.now())){await db.prepare("UPDATE codes SET mode='reverse' WHERE registration_id=? AND hash=? AND mode='bridge'").bind(row.registration_id,row.hash).run();row.mode='reverse';}
+      // "sent" only means that the bridge submitted the message. Without a
+      // delivery receipt, offer the authenticated reverse path after 90 s.
+      if(job?.status!=='delivered'){await db.prepare("UPDATE codes SET mode='reverse' WHERE registration_id=? AND hash=? AND mode='bridge'").bind(row.registration_id,row.hash).run();row.mode='reverse';}
     }
     const plain=JSON.parse(await unseal(config,row.challenge_cipher)),challenge=await challengeView(config,env,row,plain);
     return json(200,{status:row.mode==='reverse'&&row.reverse_confirmed_at?'confirmed':'pending',expiresInSeconds:challenge.expiresInSeconds,retryAfterSeconds:challenge.retryAfterSeconds,challenge});
@@ -385,7 +430,8 @@ export async function handleDownload(request,env,url=new URL(request.url)){
     const token=url.pathname.slice(10);if(token.length>1500)throw failure(403,'Link de download inválido.');
     const parts=token.split('.');if(parts.length!==2||!await crypto.subtle.verify('HMAC',config.downloadHmac,unbase64url(parts[1]),encoder.encode(parts[0])))throw failure(403,'Link de download inválido.');
     let data;try{data=JSON.parse(decoder.decode(unbase64url(parts[0])));}catch{throw failure(403,'Link de download inválido.');}
-    if(!data||!Number.isSafeInteger(data.expires)||data.expires<Date.now()||!['android','windows'].includes(data.platform)||!await config.db.prepare('SELECT id FROM registrations WHERE id=? AND whatsapp_verified=1 AND verified_at IS NOT NULL').bind(String(data.id||'')).first())throw failure(403,'Confirme o WhatsApp para liberar o download ou solicite um novo link.');
+    const channel=data?.channel==='email'?'email':'whatsapp',table=channel==='email'?'email_registrations':'registrations',verified=channel==='email'?'verified_at IS NOT NULL':'whatsapp_verified=1 AND verified_at IS NOT NULL';
+    if(!data||!Number.isSafeInteger(data.expires)||data.expires<Date.now()||!['android','windows'].includes(data.platform)||!await config.db.prepare(`SELECT id FROM ${table} WHERE id=? AND ${verified}`).bind(String(data.id||'')).first())throw failure(403,'Confirme sua conta para liberar o download ou solicite um novo link.');
     const target=config.downloads[data.platform];if(!target)throw failure(404,'Instalador ainda não publicado.');
     if(request.method==='GET')await releaseNotices.markDownload(config,String(data.id),data.platform);
     return new Response(null,{status:302,headers:{Location:target,'Cache-Control':'private, no-store','Referrer-Policy':'no-referrer'}});
@@ -404,9 +450,11 @@ export async function cleanup(env){
     config.db.prepare('DELETE FROM auth_devices WHERE refresh_expires_at<? AND NOT EXISTS(SELECT 1 FROM session_devices d JOIN sessions s ON s.hash=d.session_hash WHERE d.device_id=auth_devices.id AND s.expires_at>?)').bind(now,now),
     config.db.prepare('DELETE FROM codes WHERE expires_at<?').bind(now),
     config.db.prepare('DELETE FROM zapchat_activation_codes WHERE expires_at<?').bind(now),
+    config.db.prepare('DELETE FROM email_codes WHERE expires_at<?').bind(now),
     config.db.prepare('DELETE FROM whatsapp_outbox WHERE expires_at<?').bind(now),
     config.db.prepare('DELETE FROM attachments WHERE created_at<? AND NOT EXISTS(SELECT 1 FROM message_attachments ma WHERE ma.attachment_id=attachments.id)').bind(now-3600000),
-    config.db.prepare('DELETE FROM registrations WHERE created_at<? AND NOT EXISTS(SELECT 1 FROM users WHERE users.callsign=registrations.callsign AND users.phone_hash=registrations.phone_hash)').bind(now-30*DAY)
+    config.db.prepare('DELETE FROM registrations WHERE created_at<? AND NOT EXISTS(SELECT 1 FROM users WHERE users.callsign=registrations.callsign AND users.phone_hash=registrations.phone_hash)').bind(now-30*DAY),
+    config.db.prepare('DELETE FROM email_registrations WHERE created_at<? AND verified_at IS NULL').bind(now-30*DAY)
   ]);
 }
 

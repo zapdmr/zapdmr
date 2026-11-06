@@ -38,8 +38,12 @@ CREATE TABLE IF NOT EXISTS users (
   update_consent_at INTEGER,
   update_consent_version TEXT,
   downloaded_at INTEGER,
-  downloaded_version TEXT
+  downloaded_version TEXT,
+  email_cipher TEXT,
+  email_hash TEXT,
+  email_verified INTEGER NOT NULL DEFAULT 0 CHECK(email_verified IN(0,1))
 );
+CREATE UNIQUE INDEX IF NOT EXISTS users_email_hash ON users(email_hash) WHERE email_hash IS NOT NULL;
 CREATE TABLE IF NOT EXISTS sessions (
   hash TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -59,6 +63,38 @@ CREATE TABLE IF NOT EXISTS codes (
 );
 CREATE INDEX IF NOT EXISTS codes_expiration ON codes(expires_at);
 CREATE UNIQUE INDEX IF NOT EXISTS codes_challenge ON codes(challenge_hash) WHERE challenge_hash IS NOT NULL;
+CREATE TABLE IF NOT EXISTS email_registrations (
+  id TEXT PRIMARY KEY,
+  callsign TEXT NOT NULL,
+  dmr_id TEXT NOT NULL,
+  email_cipher TEXT NOT NULL,
+  email_hash TEXT NOT NULL,
+  authorized_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  platform TEXT NOT NULL CHECK(platform IN('android','windows')),
+  created_at INTEGER NOT NULL,
+  verified_at INTEGER,
+  notice_version TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS email_registrations_retention ON email_registrations(created_at);
+CREATE INDEX IF NOT EXISTS email_registrations_identity ON email_registrations(callsign,email_hash);
+CREATE INDEX IF NOT EXISTS email_registrations_authorized_user ON email_registrations(authorized_user_id);
+CREATE TABLE IF NOT EXISTS email_codes (
+  registration_id TEXT PRIMARY KEY REFERENCES email_registrations(id) ON DELETE CASCADE,
+  hash TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts>=0),
+  requested_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS email_codes_expiration ON email_codes(expires_at);
+CREATE TABLE IF NOT EXISTS email_recovery_audit (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  action TEXT NOT NULL CHECK(action IN('admin_bind_verified')),
+  email_hash TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS email_recovery_audit_user ON email_recovery_audit(user_id,created_at);
 CREATE TABLE IF NOT EXISTS whatsapp_outbox (
   id TEXT PRIMARY KEY,
   registration_id TEXT NOT NULL REFERENCES registrations(id) ON DELETE CASCADE,

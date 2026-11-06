@@ -29,6 +29,7 @@ const close=server=>new Promise(resolve=>server.close(resolve));
   assert.equal(automaticAprsAuthorized({callsign:'PU5RZS',dmrId:'7249999'},verified,'PU5RZS'),false,'DMR ID divergente bloqueia provisionamento');
   assert.equal(automaticAprsAuthorized({callsign:'PU5RZS',dmrId:'7240001'},{...verified,account:{...verified.account,verified:false}},'PU5RZS'),false,'cadastro explicitamente não verificado é bloqueado');
   assert.equal(automaticAprsAuthorized({callsign:'PU5RZS',dmrId:'7240001'},{...verified,account:{...verified.account,whatsapp_verified:false}},'PU5RZS'),false,'WhatsApp não verificado é bloqueado');
+  assert.equal(automaticAprsAuthorized({callsign:'PU5RZS',dmrId:'7240001'},{...verified,account:{...verified.account,whatsapp_verified:false,email_verified:true}},'PU5RZS'),true,'e-mail confirmado preserva o passcode APRS automático');
   assert.equal(automaticAprsAuthorized({callsign:'PU5RZS',dmrId:'7240001'},{...verified,token:''},'PU5RZS'),false,'sessão ausente é bloqueada');
   assert.equal(automaticAprsAuthorized({callsign:'PU5RZS',dmrId:'7240001'},{...verified,endpoint:'https://example.invalid'},'PU5RZS'),false,'origem não oficial é bloqueada');
 

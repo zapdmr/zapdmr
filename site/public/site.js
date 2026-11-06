@@ -21,8 +21,8 @@
   // The portal does not persist login in cookies, localStorage, URLs or form fields.
   let pending = null, sessionToken = '', service = null, pollTimer = null;
   const activationPanel=document.createElement('section');activationPanel.hidden=true;activationPanel.className='activation-panel';
-  const activationHeading=document.createElement('h3');activationHeading.textContent='Ativar meu cadastro no aplicativo';
-  const activationHint=document.createElement('p');activationHint.textContent='Após instalar, abra Ativar cadastro no ZapDMR e cole o código abaixo. Ele vale por 10 minutos e só pode ser utilizado uma vez. Para outro aparelho, gere um novo código. Não compartilhe este código.';
+  const activationHeading=document.createElement('h3');activationHeading.textContent='Compatibilidade com o ZapDMR 1.5.6';
+  const activationHint=document.createElement('p');activationHint.textContent='Somente enquanto o instalador 1.5.6 continuar publicado: após instalar, abra Ativar cadastro no ZapDMR e cole este código temporário. A próxima versão fará a ativação diretamente pelos seis dígitos do e-mail.';
   const activationButton=document.createElement('button');activationButton.type='button';activationButton.className='button primary';activationButton.textContent='Gerar código de ativação';
   const activationValue=document.createElement('input');activationValue.readOnly=true;activationValue.autocomplete='off';activationValue.setAttribute('aria-label','Código temporário de ativação');activationValue.hidden=true;
   const activationCopy=document.createElement('button');activationCopy.type='button';activationCopy.className='button secondary';activationCopy.textContent='Copiar código';activationCopy.hidden=true;
@@ -58,7 +58,7 @@
   const post = (path, body) => requestJson(path, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
   const seconds = (value, fallback, max = 600) => Number.isFinite(Number(value)) ? Math.max(0, Math.min(max, Number(value))) : fallback;
   const remaining = value => Math.max(0, Math.ceil((value - Date.now()) / 1000));
-  const maskedPhone = number => number.slice(0, Math.min(3, number.length - 4)) + ' ••• ••• ' + number.slice(-4);
+  const maskedEmail = value => { const [name, domain] = String(value).split('@'); return name.slice(0, 2) + '•••@' + domain; };
 
   function report(message, error = false) {
     if (!codeStatus) return;
@@ -85,9 +85,9 @@
     resendButton.disabled = pending.busy || !pending.registrationId || retry > 0 || pending.complete;
     resendButton.textContent = retry > 0 ? 'Reenviar código em ' + retry + 's' : 'Reenviar código';
     correctButton.disabled = false;
-    timerText.textContent = pending.complete ? 'Número confirmado nesta sessão.'
+    timerText.textContent = pending.complete ? 'E-mail confirmado nesta sessão.'
       : pending.registrationId && pending.mode !== 'unavailable'
-        ? (expires ? 'Código válido por ' + Math.floor(expires / 60) + ':' + String(expires % 60).padStart(2, '0') + '.' : 'Código expirado. Solicite outro ou corrija o número.') : '';
+        ? (expires ? 'Código válido por ' + Math.floor(expires / 60) + ':' + String(expires % 60).padStart(2, '0') + '.' : 'Código expirado. Solicite outro ou corrija o e-mail.') : '';
     if (!expires && pending.mode !== 'unavailable' && !pending.complete) {
       clearTimeout(pollTimer);
       whatsappLink.hidden = true;
@@ -100,13 +100,13 @@
     panel.setAttribute('aria-busy', String(value));
     refreshControls();
   }
-  function begin(number, platform) {
+  function begin(email, platform) {
     clearTimeout(pollTimer);
     sessionToken = '';
-    pending = {number, platform, registrationId: '', mode: 'unavailable', challengeToken: '', displayCode: '', retryAt: Date.now() + 60000, expiresAt: 0, busy: true, complete: false};
+    pending = {email, platform, registrationId: '', mode: 'unavailable', challengeToken: '', displayCode: '', retryAt: Date.now() + 60000, expiresAt: 0, busy: true, complete: false};
     fieldsPanel.hidden = true;
     panel.hidden = false;
-    document.querySelector('#verificationPhone').textContent = maskedPhone(number);
+    document.querySelector('#verificationPhone').textContent = maskedEmail(email);
     codeInput.value = '';
     codeInput.readOnly = false;
     codeInput.setCustomValidity('');
@@ -115,8 +115,8 @@
     developmentNotice.hidden = true;
     hideDownload();
     result.textContent = '';
-    document.querySelector('#verificationHeading').textContent = 'Confirme o seu WhatsApp';
-    report('A preparar a confirmação do seu WhatsApp…');
+    document.querySelector('#verificationHeading').textContent = 'Confirme o seu e-mail';
+    report('A enviar o código de seis dígitos para o seu e-mail…');
     busy(true);
     document.querySelector('#verificationHeading').focus();
     return pending;
@@ -130,46 +130,33 @@
     if (flow !== pending) return;
     clearTimeout(pollTimer);
     const challenge = raw?.challenge || raw;
-    if (!challenge || !['direct', 'bridge', 'reverse', 'development', 'unavailable'].includes(challenge.mode)) throw new Error('O servidor não disponibilizou uma confirmação válida. Pode reenviar ou corrigir o número.');
+    if (!challenge || !['email', 'unavailable'].includes(challenge.mode)) throw new Error('O servidor não disponibilizou uma confirmação por e-mail válida. Pode reenviar ou corrigir o endereço.');
     if (challenge.mode === 'development' && !(localHost && service?.developmentMode === true)) throw new Error('A confirmação de desenvolvimento não está permitida neste endereço.');
     flow.mode = challenge.mode;
     flow.challengeToken = typeof challenge.challengeToken === 'string' ? challenge.challengeToken : '';
-    flow.displayCode = ['reverse', 'development'].includes(flow.mode) && /^\d{6}$/.test(challenge.displayCode || '') ? challenge.displayCode : '';
+    flow.displayCode = '';
     flow.expiresAt = Date.now() + seconds(challenge.expiresInSeconds, 600) * 1000;
     flow.retryAt = Date.now() + Math.max(fromPoll ? 0 : 1, seconds(challenge.retryAfterSeconds, 60, 3600)) * 1000;
-    codeInput.value = flow.mode === 'reverse' ? flow.displayCode : '';
-    codeInput.readOnly = flow.mode === 'reverse';
+    codeInput.value = '';
+    codeInput.readOnly = false;
     codeInput.setCustomValidity('');
-    const link = flow.mode === 'bridge' ? null : whatsappUrl(challenge.whatsappUrl);
-    whatsappLink.hidden = !link;
-    if (link) whatsappLink.href = link; else whatsappLink.removeAttribute('href');
-    whatsappLink.textContent = flow.mode === 'reverse' ? 'Confirmar no WhatsApp ↗' : 'Receber código no WhatsApp ↗';
-    developmentNotice.hidden = flow.mode !== 'development';
-    developmentNotice.textContent = flow.mode === 'development' ? 'Desenvolvimento local: código ' + (flow.displayCode || 'não informado') + '. Não há envio real de WhatsApp neste modo.' : '';
-    const fallback = flow.mode === 'unavailable' ? 'A confirmação está indisponível. O cadastro foi preservado; tente reenviar mais tarde ou corrija o número.'
-      : flow.mode === 'reverse' ? 'Abra o WhatsApp e envie a mensagem preparada pelo servidor. A confirmação só acontece quando o serviço recebe a mensagem do seu número.'
-        : flow.mode === 'bridge' && challenge.queued ? 'O envio do código está na fila do WhatsApp. Aguarde a mensagem no seu número e digite os seis dígitos recebidos.'
-        : challenge.sent ? 'Código enviado. Digite os seis dígitos recebidos no seu WhatsApp.'
-          : 'Não foi possível entregar o código. O cadastro foi preservado; aguarde para reenviar ou corrija o número.';
+    whatsappLink.hidden = true;
+    whatsappLink.removeAttribute('href');
+    developmentNotice.hidden = true;
+    const fallback = flow.mode === 'unavailable' ? 'A confirmação por e-mail está indisponível. O cadastro foi preservado; tente novamente mais tarde.'
+      : 'Código enviado. Digite os seis dígitos recebidos no seu e-mail.';
     const message = typeof challenge.message === 'string' && challenge.message.length <= 500 ? challenge.message : fallback;
-    report(message, flow.mode === 'unavailable' || (flow.mode === 'direct' && !challenge.sent));
+    report(message, flow.mode === 'unavailable');
     refreshControls();
-    if (['reverse', 'bridge'].includes(flow.mode)) {
-      if (!flow.challengeToken || (flow.mode === 'reverse' && !flow.displayCode)) {
-        flow.mode = 'unavailable';
-        whatsappLink.hidden = true;
-        report('A confirmação pelo WhatsApp veio incompleta. O cadastro foi preservado; tente reenviar mais tarde.', true);
-      } else schedulePoll(flow);
-    }
-    if (flow.mode !== 'reverse' && flow.mode !== 'unavailable') codeInput.focus();
+    if (flow.mode === 'email') codeInput.focus();
   }
   async function completeVerification(flow, code) {
     if (flow !== pending || flow.complete) return;
     busy(true, flow);
     try {
-      const data = await post('/v1/auth/verify', {registrationId: flow.registrationId, code, ...(flow.challengeToken ? {challengeToken: flow.challengeToken} : {})});
+      const data = await post('/v1/email/verify', {registrationId: flow.registrationId, code, sessionProtocol: 2});
       if (flow !== pending) return;
-      if (data.user?.verified !== true || data.user?.whatsapp_verified !== true || typeof data.token !== 'string' || !data.token) throw new Error('O servidor não confirmou o seu número. O download permanece bloqueado.');
+      if (data.user?.verified !== true || data.user?.email_verified !== true || typeof data.token !== 'string' || !data.token) throw new Error('O servidor não confirmou o seu e-mail. O download permanece bloqueado.');
       sessionToken = data.token;
       activationPanel.hidden=false;clearActivation();
       flow.complete = true;
@@ -181,8 +168,8 @@
       whatsappLink.removeAttribute('href');
       clearTimeout(pollTimer);
       panel.dataset.state = 'confirmed';
-      document.querySelector('#verificationHeading').textContent = 'WhatsApp confirmado';
-      report('WhatsApp confirmado. Baixe o aplicativo e gere abaixo um código de ativação para trazer seu cadastro sem redigitar os dados.');
+      document.querySelector('#verificationHeading').textContent = 'E-mail confirmado';
+      report('E-mail confirmado. O instalador está liberado para este cadastro.');
       result.classList.remove('error');
       result.setAttribute('role', 'status');
       if (data.downloadAvailable === true && typeof data.downloadUrl === 'string') {
@@ -194,7 +181,7 @@
         result.textContent = 'Download solicitado. Se não começar, use o botão abaixo.';
         downloadLink.focus();
         downloadLink.click();
-      } else result.textContent = 'WhatsApp confirmado. O instalador desta plataforma ainda aguarda publicação.';
+      } else result.textContent = 'E-mail confirmado. O instalador desta plataforma ainda aguarda publicação.';
     } catch (error) {
       if (flow === pending) report(error.message || 'Não foi possível validar o código. Tente novamente.', true);
     } finally { busy(false, flow); }
@@ -245,7 +232,6 @@
   async function verify() {
     const flow = pending;
     if (!flow || verifyButton.disabled) return;
-    if (flow.mode === 'reverse') { await checkReverse(flow, true); return; }
     const code = codeInput.value.trim();
     if (!/^\d{6}$/.test(code)) {
       codeInput.setCustomValidity('Digite os seis dígitos do código.');
@@ -262,7 +248,7 @@
     busy(true, flow);
     flow.retryAt = Date.now() + 60000;
     report('A solicitar outro código…');
-    try { applyChallenge(await post('/v1/auth/request-code', {registrationId: flow.registrationId}), flow); }
+    try { applyChallenge(await post('/v1/email/request-code', {registrationId: flow.registrationId}), flow); }
     catch (error) {
       if (flow === pending) {
         flow.retryAt = Date.now() + Math.max(1, seconds(error.retryAfterSeconds, 60, 3600)) * 1000;
@@ -285,46 +271,44 @@
     hideDownload();
     result.textContent = '';
     result.classList.remove('error');
-    form.elements.whatsapp.focus();
+    form.elements.email.focus();
   }
   async function status() {
     try {
       const data = await requestJson('/v1/status');
-      if (typeof data.verificationConfigured !== 'boolean' || !['android', 'windows'].every(key => typeof data.downloads?.[key]?.available === 'boolean')) throw new Error('Estado indisponível.');
+      if (typeof data.emailVerificationConfigured !== 'boolean' || !['android', 'windows'].every(key => typeof data.downloads?.[key]?.available === 'boolean')) throw new Error('Estado indisponível.');
       service = data;
-      if (availability) availability.textContent = ['android', 'windows'].map(key => (key === 'android' ? 'Android' : 'Windows') + ': ' + (data.downloads[key].available ? 'instalador publicado · confirme o WhatsApp para baixar' : 'a aguardar publicação do instalador')).join(' · ');
+      if (availability) availability.textContent = ['android', 'windows'].map(key => (key === 'android' ? 'Android' : 'Windows') + ': ' + (data.downloads[key].available ? 'instalador publicado · confirme o e-mail para baixar' : 'a aguardar publicação do instalador')).join(' · ');
       if (communityAvailability) {
-        const development = localHost && data.developmentMode === true, reverse = data.verificationMode === 'reverse';
-        communityAvailability.dataset.state = data.verificationConfigured || development ? 'configured' : 'unavailable';
-        communityAvailability.textContent = development ? 'Modo de desenvolvimento local: códigos de teste visíveis, sem entrega real. Este modo não deve ser usado no site público.'
-          : data.verificationConfigured ? (reverse ? 'Confirmação pelo WhatsApp: envie a mensagem preparada a partir do seu número e aguarde a confirmação do serviço.' : 'Confirmação por código configurada. Confirme o WhatsApp para baixar; no app, entre na comunidade para usar o diretório e o ZapChat.')
-            : 'A confirmação de WhatsApp está indisponível. O cadastro pode ser guardado, mas novos downloads pelo portal, diretório e ZapChat aguardam a confirmação do número.';
+        communityAvailability.dataset.state = data.emailVerificationConfigured ? 'configured' : 'unavailable';
+        communityAvailability.textContent = data.emailVerificationConfigured ? 'Confirmação gratuita por e-mail disponível. O código tem seis dígitos, expira em 10 minutos e só pode ser usado uma vez.'
+          : 'A confirmação por e-mail está temporariamente indisponível. Nenhum serviço pago será ativado automaticamente.';
       }
       if (owner && typeof data.owner === 'string' && data.owner.trim() && typeof data.privacyEmail === 'string' && data.privacyEmail.trim()) owner.textContent = data.owner + ' · Privacidade: ' + data.privacyEmail;
     } catch {
       if (availability) availability.textContent = 'Não foi possível consultar os instaladores. Tente novamente mais tarde.';
-      if (communityAvailability) { communityAvailability.dataset.state = 'unavailable'; communityAvailability.textContent = 'Não foi possível consultar a confirmação de WhatsApp e o ZapChat. Tente novamente mais tarde.'; }
+      if (communityAvailability) { communityAvailability.dataset.state = 'unavailable'; communityAvailability.textContent = 'Não foi possível consultar a confirmação por e-mail e o ZapChat. Tente novamente mais tarde.'; }
     }
   }
   if (form && result && button && fieldsPanel && downloadLink && panel && codeInput && verifyButton && resendButton && correctButton) {
     form.addEventListener('submit', async event => {
       event.preventDefault();
       if (pending) { await verify(); return; }
-      const fields = new FormData(form), number = String(fields.get('whatsapp') || '').replace(/[\s().-]/g, '');
-      if (!/^\+[1-9]\d{7,14}$/.test(number)) {
-        result.classList.add('error'); result.setAttribute('role', 'alert'); result.textContent = 'Informe o WhatsApp com +DDI, DDD e número.'; form.elements.whatsapp.focus(); return;
+      const fields = new FormData(form), email = String(fields.get('email') || '').trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
+        result.classList.add('error'); result.setAttribute('role', 'alert'); result.textContent = 'Informe um endereço de e-mail válido.'; form.elements.email.focus(); return;
       }
       button.disabled = true;
-      const flow = begin(number, String(fields.get('platform')));
+      const flow = begin(email, String(fields.get('platform')));
       panel.removeAttribute('data-state');
       try {
-        const data = await post('/v1/registrations', {callsign: String(fields.get('callsign') || '').trim().toUpperCase(), dmrId: fields.get('dmrId'), whatsapp: number, platform: flow.platform, noticeAccepted: fields.get('noticeAccepted') === 'on', sharePhone: fields.get('sharePhone') === 'on', updateNotifications: fields.get('updateNotifications') === 'on', requestVerification: true});
+        const data = await post('/v1/email/registrations', {callsign: String(fields.get('callsign') || '').trim().toUpperCase(), dmrId: fields.get('dmrId'), email, platform: flow.platform, noticeAccepted: fields.get('noticeAccepted') === 'on', requestVerification: true});
         if (flow !== pending) return;
         if (typeof data.registrationId !== 'string' || !data.registrationId || data.verificationRequired !== true) throw new Error('O servidor não disponibilizou a confirmação do cadastro. O download permanece bloqueado.');
         flow.registrationId = data.registrationId;
         applyChallenge(data.challenge, flow);
       } catch (error) {
-        if (flow === pending) report(error.message || 'Não foi possível iniciar a confirmação. Corrija o número ou tente novamente mais tarde.', true);
+        if (flow === pending) report(error.message || 'Não foi possível iniciar a confirmação. Corrija o e-mail ou tente novamente mais tarde.', true);
       } finally { busy(false, flow); }
     });
     verifyButton.addEventListener('click', () => void verify());
@@ -336,5 +320,42 @@
     setInterval(refreshControls, 1000);
     button.disabled = false;
   }
+  const PIX_KEY = 'f91e394a-28b5-43ea-b561-24e0896e8871';
+  const pixKey = document.querySelector('#pixKey');
+  const copyPixKey = document.querySelector('#copyPixKey');
+  const pixCopyStatus = document.querySelector('#pixCopyStatus');
+  const pixDialog = document.querySelector('#pixDialog');
+  const pixOpen = document.querySelector('[data-pix-open]');
+  async function copyPix() {
+    if (!pixKey || !copyPixKey || !pixCopyStatus) return;
+    copyPixKey.disabled = true;
+    try {
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(PIX_KEY);
+      else {
+        const field = document.createElement('textarea');
+        field.value = PIX_KEY; field.readOnly = true; field.style.position = 'fixed'; field.style.opacity = '0';
+        document.body.append(field); field.select();
+        if (!document.execCommand('copy')) throw new Error('copy unavailable');
+        field.remove();
+      }
+      pixCopyStatus.textContent = 'Chave Pix copiada. Confira o beneficiário RIZANDRO CESAR DA SILVA no aplicativo bancário.';
+      copyPixKey.textContent = 'Chave copiada ✓';
+    } catch {
+      const range = document.createRange(); range.selectNodeContents(pixKey);
+      const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+      pixCopyStatus.textContent = 'Não foi possível copiar automaticamente. A chave foi selecionada para você copiar.';
+    } finally {
+      copyPixKey.disabled = false;
+      setTimeout(() => { copyPixKey.textContent = 'Copiar chave Pix'; }, 2400);
+    }
+  }
+  if (pixKey) pixKey.textContent = PIX_KEY;
+  if (copyPixKey) copyPixKey.addEventListener('click', () => void copyPix());
+  if (pixOpen && pixDialog) pixOpen.addEventListener('click', () => {
+    if (typeof pixDialog.showModal === 'function') pixDialog.showModal(); else pixDialog.setAttribute('open', '');
+  });
+  if (pixDialog) pixDialog.addEventListener('click', event => {
+    if (event.target === pixDialog) pixDialog.close();
+  });
   void status();
 })();

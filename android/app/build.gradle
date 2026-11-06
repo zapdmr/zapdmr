@@ -70,11 +70,15 @@ android {
         zapChatTest {
             initWith release
             applicationIdSuffix ".zapchattest"
-            versionNameSuffix "-zapchat-test.4.3"
+            versionNameSuffix "-zapchat-email-test.5"
             matchingFallbacks = ["release"]
             signingConfig signingConfigs.debug
             buildConfigField "boolean", "ZAPCHAT_TEST_BUILD", "true"
             manifestPlaceholders = [zapChatChannelId: "zapchat_test_messages"]
+            resValue "string", "app_name", "ZapDMR — ZapChat Teste"
+            resValue "string", "title_activity_main", "ZapDMR — ZapChat Teste"
+            resValue "string", "package_name", "br.radio.zapdmr.zapchattest"
+            resValue "string", "custom_url_scheme", "br.radio.zapdmr.zapchattest"
         }
         carPreview {
             initWith release
@@ -134,5 +138,8 @@ try {
 
 android.applicationVariants.all { variant ->
     if (variant.buildType.name == "carPreview") variant.outputs.all { versionCodeOverride = 15313 }
-    if (variant.buildType.name == "zapChatTest") variant.outputs.all { versionCodeOverride = 15626 }
+    if (variant.buildType.name == "zapChatTest") variant.outputs.all {
+        versionCodeOverride = 20005
+        versionNameOverride = "2.0.0-zapchat-email-test.5"
+    }
 }
