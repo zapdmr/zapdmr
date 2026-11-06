@@ -86,6 +86,15 @@ CREATE TABLE IF NOT EXISTS email_codes (
   requested_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS email_codes_expiration ON email_codes(expires_at);
+CREATE TABLE IF NOT EXISTS email_recovery_audit (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  action TEXT NOT NULL CHECK(action IN('admin_bind_verified')),
+  email_hash TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS email_recovery_audit_user ON email_recovery_audit(user_id,created_at);
 CREATE TABLE IF NOT EXISTS whatsapp_outbox (
   id TEXT PRIMARY KEY,
   registration_id TEXT NOT NULL REFERENCES registrations(id) ON DELETE CASCADE,

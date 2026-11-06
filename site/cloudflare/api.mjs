@@ -3,7 +3,7 @@ import {appReleases} from './app-releases.mjs';
 import {chatPush,pushConfigured} from './chat-push.mjs';
 import {sessionService} from './auth-sessions.mjs';
 import {chatInbox} from './chat-inbox.mjs';
-import {emailActivation} from './email-activation.mjs';
+import {emailActivation,normalizeEmail} from './email-activation.mjs';
 // GPL-3.0-only. Cloudflare Workers + D1 API; no Node compatibility flag required.
 // Route handling, CORS, security headers, static assets and scheduled cleanup
 // are composed by the Worker entry point. No credentials are generated here.
@@ -230,6 +230,30 @@ async function api(request,env,url,config){
     if(method==='GET'){if(url.searchParams.get('format')==='json')return json(200,{releases:await releases.history()});return new Response(await releases.page(),{headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'}});}
     if(method==='POST'){const origin=request.headers.get('Origin');if(origin!==config.origin&&origin!==url.origin)throw failure(403,'Origem administrativa inválida.');if(Number(request.headers.get('Content-Length'))>20000)throw failure(413,'Formulário grande demais.');const isJson=(request.headers.get('Content-Type')||'').includes('application/json');const raw=isJson?await body(request):Object.fromEntries(new URLSearchParams((await request.text()).slice(0,20000)));const result=raw.action==='unpublish'?await releases.unpublish(raw.versionCode):await releases.publish(raw);return isJson?json(200,result):new Response(null,{status:303,headers:{Location:'/admin/releases'}});}
     return json(405,{message:'Método não permitido.'});
+  }
+  if(route==='/admin/email-recovery'){
+    if(method!=='POST')return json(405,{message:'Método não permitido.'},{Allow:'POST'});
+    await rate(config,request,'admin-email-recovery',10,3600000);let credentials='';
+    try{const header=request.headers.get('Authorization')||'';if(header.startsWith('Basic '))credentials=decoder.decode(unbase64(header.slice(6)));}catch{}
+    if(!await sameHash(config,credentials,await hash(config,'admin:'+env.ADMIN_PASSWORD)))return json(401,{message:'Autenticação administrativa necessária.'},{'WWW-Authenticate':'Basic realm="ZapDMR"'});
+    const origin=request.headers.get('Origin');if(origin&&origin!==config.origin&&origin!==url.origin)throw failure(403,'Origem administrativa inválida.');
+    const raw=await body(request),callsign=normalizeCallsign(raw.callsign),dmrId=normalizeRadioId(raw.dmrId),email=normalizeEmail(raw.email);
+    if(raw.confirmIdentity!==callsign+':'+dmrId)throw failure(400,'Confirmação administrativa da identidade inválida.');
+    const reason=String(raw.reason||'').trim();if(reason.length<8||reason.length>200)throw failure(400,'Informe um motivo administrativo entre 8 e 200 caracteres.');
+    const emailHash=await hash(config,'email:'+email);
+    const [account,emailOwner]=await Promise.all([
+      db.prepare('SELECT * FROM users WHERE callsign=? AND dmr_id=? LIMIT 1').bind(callsign,dmrId).first(),
+      db.prepare('SELECT id FROM users WHERE email_hash=? LIMIT 1').bind(emailHash).first()
+    ]);
+    if(!account)throw failure(404,'Conta não encontrada para os dados confirmados.');
+    if(emailOwner&&emailOwner.id!==account.id)throw failure(409,'O e-mail já está vinculado a outra conta.');
+    const now=Date.now(),auditId=crypto.randomUUID(),emailCipher=await seal(config,email);
+    const result=await db.batch([
+      db.prepare('UPDATE users SET email_cipher=?,email_hash=?,email_verified=1 WHERE id=? AND callsign=? AND dmr_id=?').bind(emailCipher,emailHash,account.id,callsign,dmrId),
+      db.prepare('INSERT INTO email_recovery_audit(id,user_id,action,email_hash,reason,created_at) VALUES(?,?,?,?,?,?)').bind(auditId,account.id,'admin_bind_verified',emailHash,reason,now)
+    ]);
+    if(!result[0].meta.changes)throw failure(409,'A conta mudou durante a recuperação. Tente novamente após conferir os dados.');
+    return json(200,{ok:true,auditId,user:{callsign:account.callsign,dmrId:account.dmr_id,emailVerified:true},message:'E-mail confirmado administrativamente. O próximo acesso ainda exigirá o código de seis dígitos enviado ao endereço vinculado.'});
   }
   if(route==='/admin'||route==='/admin/'){
     if(method!=='GET')return json(405,{message:'Método não permitido.'},{Allow:'GET'});
