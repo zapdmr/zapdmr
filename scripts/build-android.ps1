@@ -66,9 +66,9 @@ try {
   if ($ZapChatTestApk) {
     $apk = Join-Path $projectRoot 'android\app\build\outputs\apk\zapChatTest\app-zapChatTest.apk'
     if (-not (Test-Path -LiteralPath $apk)) { throw 'Gradle terminou, mas app-zapChatTest.apk não foi encontrado.' }
-    $releaseDirectory = Join-Path $projectRoot 'release\android-zapchat-test-2.0.0-test.5'
+    $releaseDirectory = Join-Path $projectRoot 'release\android-zapchat-test-2.0.0-test.6'
     New-Item -ItemType Directory -Path $releaseDirectory -Force | Out-Null
-    $output = Join-Path $releaseDirectory 'ZapDMR-ZapChat-Teste-Android-2.0.0-test.5.apk'
+    $output = Join-Path $releaseDirectory 'ZapDMR-ZapChat-Teste-Android-2.0.0-test.6.apk'
     Copy-Item -LiteralPath $apk -Destination $output -Force
     $hash = (Get-FileHash -LiteralPath $output -Algorithm SHA256).Hash.ToLowerInvariant()
     [IO.File]::WriteAllText((Join-Path $releaseDirectory 'SHA256SUMS.txt'), "$hash  $(Split-Path -Leaf $output)`n", [Text.UTF8Encoding]::new($false))

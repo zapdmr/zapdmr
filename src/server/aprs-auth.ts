@@ -27,16 +27,14 @@ export function automaticAprsAuthorized(
   requestedCallsign: unknown
 ): boolean {
   const account = community?.account;
-  const profileCallsign = aprsBaseCallsign(settings.callsign);
+  const accountCallsign = aprsBaseCallsign(account?.callsign);
   return Boolean(
     String(community?.endpoint ?? '').replace(/\/$/, '') === 'https://www.zapdmr.com.br' &&
     typeof community?.token === 'string' && community.token.length > 0 &&
     account?.verified !== false &&
     (account?.whatsapp_verified === true || account?.email_verified === true) &&
-    profileCallsign &&
-    profileCallsign === aprsBaseCallsign(requestedCallsign) &&
-    profileCallsign === aprsBaseCallsign(account.callsign) &&
-    /^\d{7}$/.test(String(settings.dmrId ?? '')) &&
-    String(settings.dmrId) === String(account.dmrId ?? '')
+    accountCallsign &&
+    accountCallsign === aprsBaseCallsign(requestedCallsign) &&
+    /^\d{7}$/.test(String(account.dmrId ?? ''))
   );
 }

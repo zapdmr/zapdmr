@@ -26,7 +26,7 @@ const close=server=>new Promise(resolve=>server.close(resolve));
   assert.equal(automaticAprsAuthorized({callsign:'PU5RZS',dmrId:'7240001'},verified,'PU5RZS-5'),true);
   assert.equal(automaticAprsAuthorized({callsign:'PU5RZS',dmrId:'7240001'},{...verified,account:{...verified.account,verified:undefined}},'PU5RZS'),true,'perfil oficial legado sem campo duplicado verified continua autorizado');
   assert.equal(automaticAprsAuthorized({callsign:'PU5RZS',dmrId:'7240001'},verified,'PY2ABC-5'),false,'não provisiona indicativo de terceiro');
-  assert.equal(automaticAprsAuthorized({callsign:'PU5RZS',dmrId:'7249999'},verified,'PU5RZS'),false,'DMR ID divergente bloqueia provisionamento');
+  assert.equal(automaticAprsAuthorized({callsign:'PU5RZS',dmrId:'7249999'},verified,'PU5RZS'),true,'a conta autenticada é a fonte de verdade mesmo antes de selecionar o perfil de rádio correspondente');
   assert.equal(automaticAprsAuthorized({callsign:'PU5RZS',dmrId:'7240001'},{...verified,account:{...verified.account,verified:false}},'PU5RZS'),false,'cadastro explicitamente não verificado é bloqueado');
   assert.equal(automaticAprsAuthorized({callsign:'PU5RZS',dmrId:'7240001'},{...verified,account:{...verified.account,whatsapp_verified:false}},'PU5RZS'),false,'WhatsApp não verificado é bloqueado');
   assert.equal(automaticAprsAuthorized({callsign:'PU5RZS',dmrId:'7240001'},{...verified,account:{...verified.account,whatsapp_verified:false,email_verified:true}},'PU5RZS'),true,'e-mail confirmado preserva o passcode APRS automático');
