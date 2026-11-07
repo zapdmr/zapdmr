@@ -1399,7 +1399,7 @@ export async function startServer(options: StartOptions = {}) {
     } catch (error) { return next(error); } finally {profileMutation=false;}
   });
   app.post('/api/connect', async (_req, res) => {
-    if(!/^\+[1-9]\d{7,14}$/.test(String(communityProfile.phone||'')))return res.status(409).json({accepted:false,message:'Complete o campo WhatsApp obrigatório no Perfil antes de ligar.'});
+    if(!/^\+[1-9]\d{7,14}$/.test(String(communityProfile.phone||''))&&!(communityProfile.token&&communityProfile.account?.verified===true&&communityProfile.account?.email_verified===true))return res.status(409).json({accepted:false,message:'Confirme sua conta por e-mail no Perfil antes de ligar.'});
     connectionWanted = true;
     clearReconnect(true);
     const result = await attemptConnection(false);
@@ -1584,11 +1584,11 @@ export async function startServer(options: StartOptions = {}) {
     const profileReady = /^[A-Z0-9/ -]{1,8}$/i.test(settings.callsign) &&
       /^\d{7}$/.test(settings.dmrId) && (settings.xlxModule==='C'?/^(?:\d{2})?$/.test(settings.essid):/^\d{2}$/.test(settings.essid)) &&
       /^[a-zA-Z0-9.-]{1,180}$/.test(settings.masterHost) && Boolean(hotspotPassword);
-    if (!profileReady || !/^\+[1-9]\d{7,14}$/.test(String(communityProfile.phone||''))) {
+    if (!profileReady || !(/^\+[1-9]\d{7,14}$/.test(String(communityProfile.phone||''))||communityProfile.token&&communityProfile.account?.verified===true&&communityProfile.account?.email_verified===true)) {
       connectionWanted = false;
       reconnectMessage = passwordStoreError
         ? 'Ligação automática não iniciada: não foi possível ler a senha protegida do Windows.'
-        : 'Ligação automática não iniciada: complete o perfil, WhatsApp e Hotspot Security Password.';
+        : 'Ligação automática não iniciada: complete o perfil, a ativação e Hotspot Security Password.';
       broadcast('status', status());
     } else {
       connectionWanted = true;
