@@ -33,11 +33,11 @@ async function openWindow() {
     audioAssetsDir: resolveAudioAssetsDir()
   });
   const window = new BrowserWindow({
-    width: 1280, height: 840, minWidth: 360, minHeight: 620, title: 'ZapDMR — ZapChat Teste',
+    width: 1280, height: 840, minWidth: 360, minHeight: 620, title: 'ZapDMR',
     icon: path.join(__dirname, '..', 'assets', 'ZapDMR.ico'),
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling:false, preload: path.join(__dirname, 'preload.cjs') }
   });
-  app.setAppUserModelId('com.squirrel.zapdmrzapchattest.ZapDMR-ZapChat-Teste');
+  app.setAppUserModelId('com.squirrel.zapdmr.ZapDMR');
   const chatNotices=new Map();
   const chatOrigin=event=>{if(event.sender!==window.webContents||event.senderFrame!==window.webContents.mainFrame||new URL(event.senderFrame?.url||'about:blank').origin!==new URL(localServer.url).origin)throw new Error('Origem inválida.');};
   for(const channel of ['zapdmr-chat-notify','zapdmr-chat-clear'])ipcMain.removeHandler(channel);

@@ -55,8 +55,8 @@ try {
   Add-Type -AssemblyName System.IO.Compression.FileSystem
 
   $package = Get-Content -LiteralPath (Join-Path $projectRoot 'package.json') -Raw | ConvertFrom-Json
-  $packageId = 'zapdmrzapchattest'
-  $appDirectory = Join-Path $projectRoot 'out\ZapDMR-ZapChat-Teste-win32-x64'
+  $packageId = 'zapdmr'
+  $appDirectory = Join-Path $projectRoot 'out\ZapDMR-win32-x64'
   $releaseDirectory = Join-Path $projectRoot ('out\make\squirrel.windows\'+$package.version+'-'+[guid]::NewGuid().ToString('N')+'\x64')
   $vendorDirectory = Join-Path $projectRoot 'node_modules\electron-winstaller\vendor'
   $squirrelExe = Join-Path $vendorDirectory 'Squirrel.exe'
@@ -86,8 +86,8 @@ try {
     $description = [System.Security.SecurityElement]::Escape([string]$package.description)
     $authors = [System.Security.SecurityElement]::Escape([string]$package.author)
     $nuspec = "<?xml version=`"1.0`" encoding=`"utf-8`"?><package xmlns=`"http://schemas.microsoft.com/packaging/2010/07/nuspec.xsd`"><metadata><id>$packageId</id><title>$productName</title><version>$version</version><authors>$authors</authors><owners>$authors</owners><requireLicenseAcceptance>false</requireLicenseAcceptance><description>$description</description><copyright>Copyright 2026 ZapDMR</copyright></metadata></package>"
-    $relationships = '<?xml version="1.0" encoding="utf-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="R1" Type="http://schemas.microsoft.com/packaging/2010/07/manifest" Target="/zapdmrzapchattest.nuspec" /></Relationships>'
-    Add-ZipText $archive 'zapdmrzapchattest.nuspec' $nuspec
+    $relationships = '<?xml version="1.0" encoding="utf-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="R1" Type="http://schemas.microsoft.com/packaging/2010/07/manifest" Target="/zapdmr.nuspec" /></Relationships>'
+    Add-ZipText $archive 'zapdmr.nuspec' $nuspec
     Add-ZipText $archive '_rels/.rels' $relationships
 
     $appFiles = @(Get-ChildItem -LiteralPath $appDirectory -Recurse -File)
@@ -129,7 +129,7 @@ try {
   if ($squirrelProcess.ExitCode -ne 0) { throw "Squirrel falhou com código $($squirrelProcess.ExitCode). Consulte Squirrel-Releasify.log em $vendorDirectory." }
 
   $setupPath = Join-Path $releaseDirectory 'Setup.exe'
-  $installerPath = Join-Path $releaseDirectory 'ZapDMR-ZapChat-Teste-Setup.exe'
+  $installerPath = Join-Path $releaseDirectory 'ZapDMR-Setup.exe'
   if (-not (Test-Path -LiteralPath $setupPath -PathType Leaf)) { throw 'Squirrel terminou sem gerar Setup.exe.' }
   Move-Item -LiteralPath $setupPath -Destination $installerPath -Force
 
@@ -149,12 +149,12 @@ try {
   } finally { $fullPackage.Dispose() }
 
   if (-not (Test-Path -LiteralPath (Join-Path $releaseDirectory 'RELEASES') -PathType Leaf)) { throw 'Arquivo RELEASES ausente.' }
-  if (-not (Test-Path -LiteralPath $installerPath -PathType Leaf)) { throw 'ZapDMR-ZapChat-Teste-Setup.exe ausente.' }
+  if (-not (Test-Path -LiteralPath $installerPath -PathType Leaf)) { throw 'ZapDMR-Setup.exe ausente.' }
   # Publish these three assets together. The in-app updater consumes the full
   # Squirrel package; publishing only the .exe cannot enable future updates.
-  $publishDirectory = Join-Path $projectRoot ("release\windows-zapchat-test-$($package.version)")
+  $publishDirectory = Join-Path $projectRoot ("release\windows-$($package.version)")
   New-Item -ItemType Directory -Path $publishDirectory -Force | Out-Null
-  $publicInstallerName = "ZapDMR-ZapChat-Teste-Windows-$($package.version).exe"
+  $publicInstallerName = "ZapDMR-Windows-$($package.version).exe"
   $publicPackageName = Split-Path -Leaf $fullPackagePath
   Copy-Item -LiteralPath $installerPath -Destination (Join-Path $publishDirectory $publicInstallerName) -Force
   Copy-Item -LiteralPath $fullPackagePath -Destination (Join-Path $publishDirectory $publicPackageName) -Force

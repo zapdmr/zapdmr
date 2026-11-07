@@ -1,6 +1,6 @@
 {
-  "name": "zapdmr-zapchat-test",
-  "productName": "ZapDMR — ZapChat Teste",
+  "name": "zapdmr",
+  "productName": "ZapDMR",
   "version": "2.0.9",
   "private": true,
   "license": "GPL-3.0-only",
