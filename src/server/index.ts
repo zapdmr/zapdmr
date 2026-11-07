@@ -991,11 +991,13 @@ export async function startServer(options: StartOptions = {}) {
   app.get('/api/community-profile',(_req,res)=>res.json(communityProfile));
   app.post('/api/community-profile',async(req,res)=>{try{
     const raw=req.body||{},phone=String(raw.phone||'').replace(/[\s().-]/g,'');
-    if(!/^\+[1-9]\d{7,14}$/.test(phone))return res.status(400).json({message:'WhatsApp obrigatório com +DDI, DDD e número.'});
+    const email=String(raw.email||'').trim().toLowerCase();
+    if(!/^\+[1-9]\d{7,14}$/.test(phone)&&!(email.length<=254&&/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)))return res.status(400).json({message:'Informe um e-mail válido para ativação.'});
     const endpoint=String(raw.endpoint||'').replace(/\/$/,'');
     if(endpoint&&!/^https:\/\/[a-z0-9.-]+(?::\d{1,5})?$/i.test(endpoint)&&!/^http:\/\/(?:localhost|127\.0\.0\.1):\d{1,5}$/.test(endpoint))return res.status(400).json({message:'O servidor da comunidade deve usar HTTPS.'});
     const next={phone,endpoint,generalPreferences:raw.generalPreferences&&['auto','light','dark'].includes(raw.generalPreferences.theme)?{theme:raw.generalPreferences.theme}:undefined,chatSound:raw.chatSound!==false,sharePhone:raw.sharePhone===true,noticeAccepted:raw.noticeAccepted===true,registrationId:String(raw.registrationId||'').slice(0,80),fingerprint:String(raw.fingerprint||'').slice(0,200),token:String(raw.token||'').slice(0,100),outbox:Array.isArray(raw.outbox)?raw.outbox.slice(0,100).filter((item:any)=>item&&typeof item.text==='string'&&item.text.length<=2000&&typeof item.to==='string'&&/^[a-zA-Z0-9_-]{16,80}$/.test(item.clientId)):[],refreshToken:String(raw.refreshToken||'').slice(0,100),deviceId:String(raw.deviceId||'').slice(0,80),accessExpiresAt:Number(raw.accessExpiresAt)||0,refreshExpiresAt:Number(raw.refreshExpiresAt)||0,account:raw.account&&typeof raw.account==='object'?raw.account:null};
-    await saveWindowsSecret(communityFile,JSON.stringify(next));communityProfile=next;return res.json({saved:true});
+    const protectedProfile={...next,email,activationChannel:email?'email':'whatsapp'};
+    await saveWindowsSecret(communityFile,JSON.stringify(protectedProfile));communityProfile=protectedProfile;return res.json({saved:true});
   }catch{return res.status(500).json({message:'Não foi possível guardar o perfil da comunidade com proteção do Windows.'});}});
   app.get('/api/system-log',(_req,res)=>res.json({entries:systemLog}));
   app.delete('/api/system-log',(_req,res)=>{systemLog.length=0;res.json({ok:true});});
